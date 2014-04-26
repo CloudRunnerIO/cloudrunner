@@ -1,0 +1,14 @@
+[Unit]
+Description=CloudRunner dispatcher service
+After=syslog.target network.target
+
+[Service]
+ExecStart = /usr/bin/uwsgi --socket 0.0.0.0:8123 --module=cloudrunner.dispatcher.server:application --logto=/var/log/cloudrunner-dsp.log --pidfile=/var/run/cloudrunner-dsp.pid
+ExecStop = kill -INT `cat /var/run/cloudrunner-dsp.pid`
+ExecReload = kill -TERM `cat /var/run/cloudrunner-dsp.pid`
+Restart = always
+Type = notify
+PIDFile = /var/run/cloudrunner-dsp.pid
+
+[Install]
+WantedBy=multi-user.target

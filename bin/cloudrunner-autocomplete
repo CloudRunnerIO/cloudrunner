@@ -1,0 +1,8 @@
+#! /bin/bash
+
+# Test for argcomplete:
+python -c "import argcomplete" || echo "ArgComplete is not installed. \
+Install it using 'pip install argcomplete'"
+
+eval "$(register-python-argcomplete cloudrunner)"
+eval "$(register-python-argcomplete cloudrunner-node)"

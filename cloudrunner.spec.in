@@ -1,0 +1,187 @@
+%if 0%{?fedora} > 16
+%define __python python2.7
+%endif
+
+%{!?python_sitelib: %global python_sitelib %(%{__python} -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())")}
+
+
+Name:       cloudrunner
+Version:    0.5
+Release:    4.cloudr%{?dist}
+Summary:    CloudRunner engine for running scripts in cloud environment
+Group:      Cloud tools
+License:    Apache2
+URL:        http://www.cloudrunner.io/
+Source0:    %{name}-%{version}.tar.gz
+BuildRoot:  %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
+BuildArch:  noarch
+
+BuildRequires: python-setuptools
+
+BuildRequires: gcc
+BuildRequires: gcc-c++
+BuildRequires: python-devel
+
+Requires: python-argparse
+Requires: m2crypto
+Requires: python-zmq
+Requires: python-httplib2
+Requires: python-setuptools
+Requires: python-crontab
+
+%if 0%{?rhel} < 7 && 0%{?fedora} < 13
+Requires: python-importlib
+%endif
+
+%description
+CloudRunner execution engine. Consists of three modules:
+1. Node (cloudrunner-node) service - Starts an agent on a server node
+2. Agent/Runner (cloudrunner) - a tool to connect and run scripts on nodes
+This package contains common libs and files.
+
+
+%package node
+Summary:    CloudRunner node
+Group:      Cloud tools
+Requires:   %{name} = %{version}-%{release}
+%description node
+CloudRunner engine for running scripts in cloud environment.
+This package contains node service software.
+
+%package cli
+Summary:    CloudRunner cli
+Group:      Cloud tools
+Requires:   %{name} = %{version}-%{release}
+%description cli
+CloudRunner engine for running scripts in cloud environment.
+This package contains command line tool, which connects to master node,
+(the node where dispatcher package is installed) for managing your IT infrastructure.
+
+#%package heat
+#Summary:    CloudRunner engine for running scripts in cloud environment.
+#This package contains a plugin for Openstack Heat project
+#Group:      Cloud tools
+#Requires:   openstack-heat-engine
+
+
+%prep
+%setup -q
+
+%build
+%{__python} setup.py build
+
+
+%install
+rm -rf %{buildroot}
+
+# The python package
+%{__python} setup.py install -O1 --skip-build --root $RPM_BUILD_ROOT
+
+
+mkdir -p $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}
+install -m644 conf/cloudrunner-node.conf $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/
+install -m644 conf/cloudrunner-shell.conf $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/
+
+mkdir -p $RPM_BUILD_ROOT/%{_initrddir}
+install -m755 etc/rc.d/init.d/centos/cloudrunner-node $RPM_BUILD_ROOT/%{_initrddir}
+
+sed -i -e 's,{lib_dir},%{python_sitelib},g' $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/cloudrunner-node.conf
+sed -i -e 's,{cert_dir},%{_sharedstatedir}/cloudrunner/certs,g' $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/cloudrunner-node.conf
+sed -i -e 's,{lib_dir},%{python_sitelib},g' $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/cloudrunner-shell.conf
+sed -i -e 's,{var_dir},/var/lib/cloudrunner/,g' $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/cloudrunner-shell.conf
+
+mkdir -p $RPM_BUILD_ROOT/var/run/cloudrunner/
+mkdir -p $RPM_BUILD_ROOT/var/lib/cloudrunner/
+mkdir -p $RPM_BUILD_ROOT/var/lib/cloudrunner_node/
+mkdir -p $RPM_BUILD_ROOT/var/run/sock/cloudrunner/
+mkdir -p $RPM_BUILD_ROOT/var/lib/cloudrunner/plugins/
+
+%clean
+rm -rf %{buildroot}
+
+%files
+%defattr(-,root,root,-)
+%doc README.rst
+
+%dir %{_sysconfdir}/cloudrunner/
+%dir /var/run/cloudrunner/
+%dir /var/run/sock/cloudrunner/
+%dir /var/lib/cloudrunner/
+%dir /var/lib/cloudrunner/plugins/
+
+%dir %{python_sitelib}/cloudrunner/
+%{python_sitelib}/cloudrunner/tests/*
+%{python_sitelib}/cloudrunner/__init__*
+%{python_sitelib}/cloudrunner/core
+%{python_sitelib}/cloudrunner/util
+%{python_sitelib}/cloudrunner/plugins
+%{python_sitelib}/cloudrunner-%{version}-py*.egg-info
+%{python_sitelib}/cloudrunner/version.*
+
+
+%postun node
+/sbin/service %{name}-node condrestart > /dev/null 2>&1 || :
+
+%preun node
+if [ "$1" = 0 ]
+then
+        /sbin/service %{name}-node stop > /dev/null 2>&1 || :
+        /sbin/chkconfig %{name}-node --del sshd
+fi
+
+
+%files node
+%{_bindir}/cloudrunner-node
+
+%{python_sitelib}/cloudrunner/node
+
+%{_initrddir}/cloudrunner-node
+%config(noreplace) %{_sysconfdir}/cloudrunner/cloudrunner-node.conf
+%{python_sitelib}/cloudrunner/version.*
+
+%dir /var/lib/cloudrunner_node/
+
+%files cli
+%{_bindir}/cloudrunner
+%{_bindir}/cloudrunner-exec
+%{_bindir}/cloudrunner-autocomplete
+
+%{python_sitelib}/cloudrunner/shell
+
+%config(noreplace) %{_sysconfdir}/cloudrunner/cloudrunner-shell.conf
+
+#%files heat
+#TODO
+
+%changelog
+* Mon Feb 17 2014 Stiliyan Sabchev <ssabchev at cloudrunner dot io> - 0.3-4
+- Clean duplicated directories with main package
+
+* Wed Feb 05 2014 Stiliyan Sabchev <ssabchev at cloudrunner dot io> - 0.3-4
+- fix directories in /var/lib
+
+* Tue Feb 04 2014 Stiliyan Sabchev <ssabchev at cloudrunner dot io> - 0.3-3
+- add version.py
+
+* Wed Dec 04 2013 Stiliyan Sabchev <ssabchev at cloudrunner dot io> - 0.2-1
+- add python db/migrate.py
+
+* Thu Nov 07 2013 Stiliyan Sabchev <ssabchev at cloudrunner dot io> - 0.2-0
+- Multiple packages
+
+* Fri Oct 11 2013 Stiliyan Sabchev <ssabchev at cloudrunner dot io> - 0.1
+- removed cloudrunner-ui
+- added autocomplete
+
+* Tue Oct 08 2013 Stiliyan Sabchev <ssabchev at cloudrunner dot io> - 0.1.2
+- add dir for pid
+
+* Tue Aug 20 2013 Stiliyan Sabchev <ssabchev at cloudrunner dot io> - 0.1.1
+- change python version for fedora 19
+
+* Thu Aug 8 2013 Stiliyan Sabchev <ssabchev at cloudrunner dot io> - 0.1.1
+- fix mkdir
+- fix requirements for fedora 17 or later
+
+* Sat Jul 27 2013 Tihomir Trifonov - 0.1.0
+- Initial package

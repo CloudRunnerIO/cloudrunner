@@ -1,0 +1,62 @@
+#!/bin/bash
+# CloudRunner node agent
+# chkconfig: 345 20 80
+# description: CloudRunner Node service
+# processname: /usr/bin/cloudrunner-node
+
+NAME=cloudrunner-node
+DESC="CloudRunner Node service"
+PIDFILE=/var/run/cloudrunner/$NAME.pid
+SCRIPTNAME=/etc/init.d/cloudrunner-node
+
+DAEMON=/usr/bin/cloudrunner-node
+DAEMONOPTS="--pidfile=$PIDFILE"
+
+case "$1" in
+start)
+    printf "%-50s" "Starting $NAME..."
+    $DAEMON start $DAEMONOPTS 2>&1
+    PID=`cat $PIDFILE`
+    if [ -z $PID ]; then
+        printf "%s\n" "Fail"
+    else
+        printf "%s\n" "Ok"
+    fi
+;;
+start_wait)
+    printf "%-50s" "Starting $NAME with waiting for approval..."
+    $DAEMON start $DAEMONOPTS -w 240 2>&1
+    PID=`cat $PIDFILE`
+    if [ -z $PID ]; then
+        printf "%s\n" "Fail"
+    else
+        printf "%s\n" "Ok"
+    fi
+;;
+status)
+    printf "%-50s" "Checking $NAME..."
+    if [ -f $PIDFILE ]; then
+        PID=`cat $PIDFILE`
+        if [ -z "`ps axf | grep ${PID} | grep -v grep`" ]; then
+            printf "%s\n" "Process dead but pidfile exists"
+        else
+            echo "Running"
+        fi
+    else
+        printf "%s\n" "Service not running"
+    fi
+;;
+stop)
+    printf "%-50s" "Stopping $NAME"
+    $DAEMON stop $DAEMONOPTS
+;;
+
+restart)
+    printf "%-50s" "Restarting $NAME"
+    $DAEMON restart $DAEMONOPTS
+;;
+
+*)
+    echo "Usage: $0 {status|start|stop|restart}"
+    exit 1
+esac

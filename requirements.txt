@@ -1,0 +1,3 @@
+pyzmq
+M2Crypto
+httplib2

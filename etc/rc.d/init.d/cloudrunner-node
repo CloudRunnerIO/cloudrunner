@@ -1,0 +1,14 @@
+[Unit]
+Description=CloudRunner node service
+After=syslog.target network.target
+
+[Service]
+ExecStart = /usr/bin/cloudrunner-node --pid /var/run/cloudrunner-node.pid
+ExecStop = kill -INT `cat /var/run/cloudrunner-node.pid`
+ExecReload = kill -TERM `cat /var/run/cloudrunner-node.pid`
+Restart = always
+Type = notify
+PIDFile = /var/run/cloudrunner-node.pid
+
+[Install]
+WantedBy=multi-user.target

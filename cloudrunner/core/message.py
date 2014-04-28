@@ -243,8 +243,12 @@ class ClientRep(BaseMessage):
             self.extra = None
 
     def pack(self):
-        return [self.ident,
-                json.dumps([self.dest, self.control, self.data])]
+        if self.extra:
+            return [self.ident, json.dumps([self.dest, self.control,
+                                            self.data, self.extra])]
+        else:
+            return [self.ident,
+                    json.dumps([self.dest, self.control, self.data])]
 
 
 class JobRep(BaseMessage):

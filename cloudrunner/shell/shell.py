@@ -17,7 +17,7 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-import signal
+
 
 try:
     import argcomplete
@@ -30,6 +30,7 @@ import json
 import logging
 import os
 from select import select
+import signal
 import sys
 
 from cloudrunner import CONFIG_SHELL_LOC

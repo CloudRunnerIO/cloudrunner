@@ -6,7 +6,7 @@ Copyright (c) 2013-2014 CloudRunner.IO_
 About
 --------
 
-CloudRunner.IO_ is a simple yet powerfull framework for remote server management.
+CloudRunner.IO_ is a simple yet powerful framework for remote server management.
 It's key features include:
 
 * **Execute scripts** in your choice(bash, python, ruby, puppet and chef-solo recipes)

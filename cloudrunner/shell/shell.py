@@ -29,7 +29,9 @@ import glob
 import json
 import logging
 import os
+import re
 from select import select
+import shlex
 import signal
 import sys
 
@@ -48,9 +50,10 @@ from cloudrunner.util.shell import Console
 from cloudrunner.util.http import load_from_link
 from cloudrunner.util.http import parse_url
 
-
 CONFIG = Config(CONFIG_SHELL_LOC)
 PLUGINS = {}
+LIBRARY_ITEM = re.compile(r'\[\w*\]\://')
+HTTP_ITEM = re.compile(r'https*\://.*')
 
 LOG_FORMAT = '>>%(levelname)s:%(message)s'
 
@@ -168,7 +171,7 @@ class Shell(cmd.Cmd):
         return self._api
 
     def handle_int(self, *args, **kwargs):
-        print args, kwargs
+        print
 
     @property
     def prompt(self):
@@ -250,7 +253,12 @@ class Shell(cmd.Cmd):
         if not arg:
             return
         if not os.path.exists(arg):
-            console.red("File '%s' doesn't exist" % arg)
+            if HTTP_ITEM.match(arg):
+                self.included_files.append((arg, arg))
+            elif arg in self.api.library.keys():
+                self.included_files.append((self.api.library[arg], arg))
+            else:
+                console.red("File '%s' doesn't exist" % arg)
         else:
             self.included_files.append((arg, self._sanitize_path(arg)))
 
@@ -259,7 +267,12 @@ class Shell(cmd.Cmd):
         if not arg:
             return
         if not os.path.exists(arg):
-            console.red("File '%s' doesn't exist" % arg)
+            if HTTP_ITEM.match(arg):
+                self.attached_files.append((arg, arg))
+            elif arg in self.api.library.keys():
+                self.attached_files.append((self.api.library[arg], arg))
+            else:
+                console.red("File '%s' doesn't exist" % arg)
         else:
             self.attached_files.append((arg, self._sanitize_path(arg)))
 
@@ -280,9 +293,12 @@ class Shell(cmd.Cmd):
         pwd = os.path.join(os.path.abspath(os.path.curdir))
         search_dir = os.path.dirname(os.path.join(pwd, pattern))
         selector = pattern.rpartition('/')[2]
-        pattern = os.path.join(search_dir, selector) + '*'
+        glob_pattern = os.path.join(search_dir, selector) + '*'
         res = [os.path.relpath(p, search_dir)
-               for p in list(glob.glob(pattern))]
+               for p in list(glob.glob(glob_pattern))]
+        if self.api.library:
+            res.extend([k for k, v in self.api.library.items()
+                        if v.startswith(pattern)])
         return res
 
     def complete_attach_file(self, opt, full, arg_start, arg_end):
@@ -396,13 +412,16 @@ class Shell(cmd.Cmd):
             ares = self.api.run_local(script)
         else:
             self.current_session = None
+            includes, args = self._includes()
+            if args:
+                options.extend(args)
             ares = self.api.run_remote(
                 "#!switch[%s] %s\n%s\n\n%s" % (
                 self.target,
                 " ".join(options),
                 LANGS[self.lang],
                 script),
-                includes=self._includes(),)
+                includes=includes,)
 
         self.render_msg(ares)
 
@@ -552,23 +571,22 @@ class Shell(cmd.Cmd):
 
         console.new_line()
 
-        console.green('*' * 3, "Job Plugins", '*' * 3)
+        console.green('*' * 3, "Plugins", '*' * 3)
         for arg in result[0]:
             console.blue(arg[0])
             console.yellow('\t' + '\n\t'.join(arg[1]))
 
         console.new_line()
         console.green('*' * 3, "CLI Plugins", '*' * 3)
-        console.blue(result[1][0])
-        console.yellow('\t' + '\n\t'.join(result[1][1]))
+        for arg in result[1]:
+            console.blue(arg[0])
+            console.yellow('\t%s' % arg[1])
 
-    def get_plugin(self):
-
-        result = self.api.get_plugin()
-
-        console.green("=" * 80)
-        console.green("Result from plugin run:", bold=1)
-        console.green("=" * 80)
+    def do_plugin(self, *args):
+        params = args[0].split(" ")
+        plugin_name = params.pop(0)
+        params = shlex.split(" ".join(params))
+        result = self.api.get_plugin(plugin_name, args=params)
 
         if result:
             for res in result:
@@ -579,6 +597,23 @@ class Shell(cmd.Cmd):
                     console.red(msg)
         else:
             console.red('Error: %s' % result)
+
+    def complete_plugin(self, opt, full, arg_start, arg_end):
+        _plugins = []
+        if not opt and arg_start > len("plugin"):
+            # Just one plugin
+            return _plugins
+        if not hasattr(self, "_plugins"):
+            _plugins = []
+            if self.api.transport.mode == "server":
+                try:
+                    result = self.api.list_plugins()
+                    _plugins = [p[0] for p in result[1]]
+                except Exception, ex:
+                    print ex
+            self._plugins = _plugins
+
+        return [p for p in self._plugins if not opt or p.startswith(opt)]
 
     def capture_run(self):
         colors.disable()
@@ -600,29 +635,39 @@ class Shell(cmd.Cmd):
 
     def _includes(self):
         libs = []
+        options = []
+
         for (_file, name) in self.included_files:
-            try:
-                data = {}
-                with open(_file) as f:
-                    incl_content = f.read()
-                    data["name"] = name
-                    data["inline"] = True
-                    data["source"] = incl_content
-                    libs.append(data)
-            except IOError:
-                console.red("Cannot open include file %s" % _file)
+            if LIBRARY_ITEM.match(name) or HTTP_ITEM.match(_file):
+                # From library
+                options.append('--include-lib="%s"' % _file)
+            else:
+                try:
+                    data = {}
+                    with open(_file) as f:
+                        incl_content = f.read()
+                        data["name"] = name
+                        data["inline"] = True
+                        data["source"] = incl_content
+                        libs.append(data)
+                except IOError:
+                    console.red("Cannot open include file %s" % _file)
 
         for (_file, name) in self.attached_files:
-            try:
-                data = {}
-                with open(_file) as f:
-                    incl_content = f.read()
-                    data["name"] = name
-                    data["source"] = incl_content
-                    libs.append(data)
-            except IOError:
-                console.red("Cannot open include file %s" % _file)
-        return libs
+            if LIBRARY_ITEM.match(name) or HTTP_ITEM.match(_file):
+                # From library
+                options.append('--attach-lib="%s"' % _file)
+            else:
+                try:
+                    data = {}
+                    with open(_file) as f:
+                        incl_content = f.read()
+                        data["name"] = name
+                        data["source"] = incl_content
+                        libs.append(data)
+                except IOError:
+                    console.red("Cannot open attach file %s" % _file)
+        return libs, options
 
     def terminate(self):
         self.api.close()

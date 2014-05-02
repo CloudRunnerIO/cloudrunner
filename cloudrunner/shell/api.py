@@ -113,7 +113,6 @@ class CloudRunner(object):
     def __init__(self, transport, plugins=None,
                  request_timeout=DEFAULT_TIMEOUT,
                  auth_user=None, auth_token=None, **kwargs):
-
         self.transport = transport
         self.plugins = plugins
         self.request_timeout = request_timeout
@@ -287,12 +286,35 @@ class CloudRunner(object):
     def list_pending_nodes(self):
         return self._list_nodes_get('list_pending_nodes')
 
+    @property
+    def library(self):
+        if hasattr(self, "_library"):
+            return self._library
+        _library = {}
+
+        if self.transport.mode != "server":
+            return _library
+
+        try:
+            success, result = self.get_plugin("library",
+                                              args=["list", "--json"])[0]
+            if success:
+                for store_name, items in result.items():
+                    for item in items:
+                        item_name = "[%s]://%s" % (store_name, item['name'])
+                        item_path = item['name']
+                        _library[item_name] = item_path
+                self._library = _library
+        except:
+            pass
+
+        return _library
+
     def get_plugin(self, controller, data=None, args=None):
         req = self.build_request()
         req.append(plugin=controller)
-
         req.append(control='plugin', data=data)
-        req.append(args=' '.join(args if args is not None else []))
+        req.append(args='"' + '" "'.join(args) + '"')
 
         self.queue.send(*req.pack())
         resp = self.queue.recv()
@@ -306,10 +328,8 @@ class CloudRunner(object):
         req.append(control='plugins')
 
         self.queue.send(*req.pack())
-        status, resp = self.queue.recv()
-        if len(resp) > 1:
-            result = json.loads(resp[1])
+        success, result = self.queue.recv()
+        if success and len(result) > 0:
+            return json.loads(result)
         else:
-            result = []
-
-        return result
+            return []

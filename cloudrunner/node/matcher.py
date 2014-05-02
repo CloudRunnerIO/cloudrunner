@@ -42,7 +42,16 @@ class Matcher(object):
         self.host = gethostname().lower()
         self.os = platform.system()
         self.arch = platform.machine()
-        self.dist = platform.dist()[0]  # only OS, not version
+        try:
+            # only OS, not version
+            self.dist = platform.linux_distribution()[0]
+            if not self.dist:
+                # Try a hack for ArchLinux
+                self.dist = platform.linux_distribution(
+                    supported_dists=('arch'))[0]  # only OS, not version
+        except:
+            # Python < 2.6
+            self.dist = platform.dist()[0]  # only OS, not version
         self.release = platform.release()
         self.ips = []
         try:

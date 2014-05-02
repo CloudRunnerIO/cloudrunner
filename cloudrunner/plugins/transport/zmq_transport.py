@@ -226,7 +226,7 @@ class ZmqCliTransport(TransportBackend):
                             # Use default port
                             ip = "%s:5552" % ip
                         ip = "tcp://%s" % ip
-                        if target not in remote_socks:
+                        if ip not in remote_socks:
                             proxy_sock = self.context.socket(zmq.DEALER)
                             proxy_sock.setsockopt(zmq.IDENTITY, frames[1])
                             uri = ssl_proxy_uri % target
@@ -241,11 +241,11 @@ class ZmqCliTransport(TransportBackend):
                                 skip_warnings=True,
                                 validate_peer=validate_peer)
                             Thread(target=ssl_socket.start).start()
-                            remote_socks[target] = [proxy_sock, ssl_socket]
+                            remote_socks[ip] = [proxy_sock, ssl_socket]
                             poller.register(proxy_sock, zmq.POLLIN)
                             # ping socket to establish connection
                             proxy_sock.send_multipart(['PING'])
-                        proxy_sock = remote_socks[target][0]
+                        proxy_sock = remote_socks[ip][0]
                         proxy_sock.send_multipart(frames)
                     for sock in ready:
                         if sock != router_sock:
@@ -290,7 +290,7 @@ class ZmqCliTransport(TransportBackend):
                                           host_resolver=host_resolver,
                                           **kwargs)
                         self.sessions[session.session_id] = session
-
+                        self.curr_session = session.session_id
                         session.start()
                     except Exception, ex:
                         print '%r' % ex
@@ -298,6 +298,8 @@ class ZmqCliTransport(TransportBackend):
                 if worker in ready:
                     frames = worker.recv_multipart()
                     data = json.loads(frames[2])
+                    if frames[0] != self.curr_session:
+                        continue
                     if len(data) > 4 and data[0] != 'FINISHED':
                         # PIPE
                         dispatcher.send_multipart(list(stringify(*data)))

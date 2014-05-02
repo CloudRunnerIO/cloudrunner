@@ -75,15 +75,17 @@ class Session(Thread):
             for target in targets:
                 try:
                     host = gethostbyname(target)
+                    target_uris.append((target, host))
                 except Exception, ex:
                     # Try the resolvehost.conf file
                     if self.host_resolver and target in self.host_resolver:
-                        host = self.host_resolver[target]
+                        hosts = self.host_resolver[target]
+                        for host in hosts:
+                            target_uris.append((target, host))
                     else:
                         LOG.warn("Cannot resolve hostname: %s" % target)
                         continue
 
-                target_uris.append((target, host))
             self.steps.append((target_str, target_uris, section,
                                kwargs.get("includes")))
 
@@ -150,7 +152,6 @@ class Session(Thread):
     def execute_step(self, env, targets, hosts, script, libs):
         # 2 sec default
         job_id = uuid.uuid4().hex
-
         #discovery_time = float(self.config.discovery_time or 1)
         start_time = time.time()
         end_discovery_time = start_time + 3
@@ -165,89 +166,86 @@ class Session(Thread):
                 self.worker_sock.send_multipart(
                     [tgt, host, 'REQ', self.session_id, tgt])
 
-            poller = zmq.Poller()
-            poller.register(self.worker_sock, zmq.POLLIN)
-
             # while end_time - time.time() > 0:
                 # if self.worker_sock.poll(100):
                 #    num_nodes += 1
                 #    frames = self.worker_sock.recv_multipart()
             end_time = time.time() + self.timeout
             while not self.run_event.is_set() and end_time - time.time() > 0:
-                ready = dict(poller.poll(500))
-                if time.time() - end_discovery_time > 0 and num_nodes == 0:
-                    break
-
-                if self.worker_sock in ready:
-                    frames = self.worker_sock.recv_multipart()
-
-                    if frames[0] != self.session_id:
-                        # Skip
-                        continue
-                    if len(frames) == 3:
-                        # Ready
-                        num_nodes += 1
-                        tgt = frames[0]
-                        for (tgt, host) in hosts:
-                            self.worker_sock.send_multipart([
-                                tgt, '', 'REQ', self.session_id,
-                                "JOB", json.dumps(['@', request])])
-                        continue
-                    # else:
-                    #    self.reply_sock.send_multipart(list(frames))
-                    job_rep = LocalJobRep.build(*frames)
-                    state = node_map.setdefault(job_rep.peer,
-                                                dict(
-                                                    status=StatusCodes.STARTED,
-                                                data={},
-                                                remote_user=job_rep.run_as,
-                                                stdout='',
-                                                stderr=''))
-                    state['data'].update(job_rep.data)
-
-                    if job_rep.control == StatusCodes.FINISHED:
-                        # frames[4]
-                        num_nodes -= 1
-                        node_map[job_rep.peer]['status'] = StatusCodes.FINISHED
-                    elif job_rep.control in [StatusCodes.STDOUT,
-                                             StatusCodes.STDERR]:
-                        pipe_msg = PipeMessage(
-                            session_id=self.session_id,
-                            task_name='',
-                            user=job_rep.run_as,
-                            org='',
-                            targets=targets,
-                            tags='',
-                            job_id=job_rep.job_id,
-                            run_as=job_rep.run_as,
-                            node=job_rep.peer,
-                            stdout=job_rep.data.get('stdout', ''),
-                            stderr=job_rep.data.get('stderr', '')
-                        )
-                        self.reply_sock.send_multipart(
-                            pipe_msg.pack(self.session_id, self.session_id))
-
+                if not self.worker_sock.poll(400):
+                    if time.time() - end_discovery_time > 0 and num_nodes <= 0:
+                        break
                     else:
-                        # node_map[peer][stdout] =
-                        outputs = json.loads(frames[4])
-                        outputs.setdefault('stdout', "")
-                        outputs.setdefault('stderr', "")
+                        continue
 
-                        pipe_msg = PipeMessage(
-                            session_id=self.session_id,
-                            task_name='',
-                            user=job_rep.run_as,
-                            org='',
-                            targets=targets,
-                            tags='',
-                            job_id=job_rep.job_id,
-                            run_as=job.run_as,
-                            node=job_rep.peer,
-                            stdout=outputs['stdout'],
-                            stderr=outputs['stderr']
-                        )
-                        self.reply_sock.send_multipart(
-                            pipe_msg.pack(self.session_id))
+                frames = self.worker_sock.recv_multipart()
+                if frames[0] != self.session_id:
+                    # Skip
+                    continue
+                if len(frames) == 3:
+                    # Ready
+                    num_nodes += 1
+                    tgt = frames[0]
+                    for (tgt, host) in hosts:
+                        self.worker_sock.send_multipart([
+                            tgt, host, 'REQ', self.session_id,
+                            "JOB", json.dumps(['@', request])])
+                    continue
+                # else:
+                #    self.reply_sock.send_multipart(list(frames))
+                job_rep = LocalJobRep.build(*frames)
+                state = node_map.setdefault(job_rep.peer,
+                                            dict(
+                                                status=StatusCodes.STARTED,
+                                            data={},
+                                            remote_user=job_rep.run_as,
+                                            stdout='',
+                                            stderr=''))
+                state['data'].update(job_rep.data)
+
+                if job_rep.control == StatusCodes.FINISHED:
+                    # frames[4]
+                    num_nodes -= 1
+                    node_map[job_rep.peer]['status'] = StatusCodes.FINISHED
+                elif job_rep.control in [StatusCodes.STDOUT,
+                                         StatusCodes.STDERR]:
+                    pipe_msg = PipeMessage(
+                        session_id=self.session_id,
+                        task_name='',
+                        user=job_rep.run_as,
+                        org='',
+                        targets=targets,
+                        tags='',
+                        job_id=job_rep.job_id,
+                        run_as=job_rep.run_as,
+                        node=job_rep.peer,
+                        stdout=job_rep.data.get('stdout', ''),
+                        stderr=job_rep.data.get('stderr', '')
+                    )
+                    self.reply_sock.send_multipart(
+                        pipe_msg.pack(self.session_id, self.session_id))
+
+                else:
+                    # node_map[peer][stdout] =
+                    outputs = json.loads(frames[4])
+                    outputs.setdefault('stdout', "")
+                    outputs.setdefault('stderr', "")
+
+                    pipe_msg = PipeMessage(
+                        session_id=self.session_id,
+                        task_name='',
+                        user=job_rep.run_as,
+                        org='',
+                        targets=targets,
+                        tags='',
+                        job_id=job_rep.job_id,
+                        run_as=job.run_as,
+                        node=job_rep.peer,
+                        stdout=outputs['stdout'],
+                        stderr=outputs['stderr']
+                    )
+                    self.reply_sock.send_multipart(
+                        pipe_msg.pack(self.session_id))
         except zmq.ZMQError, zerr:
             if not self.run_event.is_set():
                 if self.ctx.closed or \

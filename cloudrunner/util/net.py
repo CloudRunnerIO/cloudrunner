@@ -83,34 +83,28 @@ class HostResolver(object):
     Enter the host:port combinations to the resolv_host.conf file
     """
 
-    SECTION = "Nodes"
-
     def __init__(self, resolv_file):
         self.resolv_file = resolv_file
         self._init(resolv_file)
 
     def __contains__(self, host):
-        return bool([item[1] for item in self._conf.nodes.items()
-                     if item[0] == host])
+        return host in self._conf._config.sections()
 
     def __getitem__(self, key):
         if key not in self:
             return None
-        host = [item[1] for item in self._conf.nodes.items()
-                if item[0] == key][0]
-        return host
+        return [item[1] for item in self._conf._config.items(key)]
 
     def _init(self, resolv_file):
         try:
             self._conf = Config(resolv_file)
-            self._conf.add_section("nodes", self.SECTION)
         except:
             pass
 
     def add(self, name, host):
-        if not self._conf._config.has_section(self.SECTION):
-            self._conf._config.add_section(self.SECTION)
-        self._conf._config.set(self.SECTION, name, host)
+        if not self._conf._config.has_section(name):
+            self._conf._config.add_section(name)
+        self._conf._config.set(name, "ip", host)
         if not os.path.exists(os.path.dirname(self.resolv_file)):
             os.makedirs(os.path.dirname(self.resolv_file))
         self._conf._config.write(open(self.resolv_file, 'w'))

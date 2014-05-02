@@ -54,8 +54,7 @@ class ConfigBase(Mapper):
             try:
                 return self._config.items(self._section)
             except:
-                LOG.debug("No section %s found in %s" %
-                         (self._section, config_file))
+                LOG.debug("No section %s" % self._section)
                 return {}
 
     def __init__(self, config_file):

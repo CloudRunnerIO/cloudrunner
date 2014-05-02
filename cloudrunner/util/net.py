@@ -85,9 +85,16 @@ class HostResolver(object):
 
     def __init__(self, resolv_file):
         self.resolv_file = resolv_file
-        self._init(resolv_file)
+        self._init()
+
+    def _check_changed(self):
+        curr_time = os.stat(self.resolv_file).st_mtime
+        if curr_time != self.f_time:
+            self.f_time = curr_time
+            self._init()
 
     def __contains__(self, host):
+        self._check_changed()
         return host in self._conf._config.sections()
 
     def __getitem__(self, key):
@@ -95,16 +102,39 @@ class HostResolver(object):
             return None
         return [item[1] for item in self._conf._config.items(key)]
 
-    def _init(self, resolv_file):
+    def _init(self):
         try:
-            self._conf = Config(resolv_file)
+            self._conf = Config(self.resolv_file)
+            self.f_time = os.stat(self.resolv_file).st_mtime
         except:
             pass
 
-    def add(self, name, host):
-        if not self._conf._config.has_section(name):
-            self._conf._config.add_section(name)
-        self._conf._config.set(name, "ip", host)
+    def mappings(self):
+        mappings = {}
+        self._check_changed()
+        for item in self._conf._config.sections():
+            mappings[item] = [m[1] for m in self._conf._config.items(item)]
+
+        return mappings
+
+    def add(self, target, name, host):
+        if not self._conf._config.has_section(target):
+            self._conf._config.add_section(target)
+        self._conf._config.set(target, name, host)
         if not os.path.exists(os.path.dirname(self.resolv_file)):
             os.makedirs(os.path.dirname(self.resolv_file))
         self._conf._config.write(open(self.resolv_file, 'w'))
+
+    def remove(self, target, host):
+        if not self._conf._config.has_section(target):
+            return False
+        section = self._conf._config.items(target)
+        keys = [k[0] for k in section if k[1] == host]
+        if not keys:
+            return False
+
+        for k in keys:
+            self._conf._config.remove_option(target, k)
+        self._conf._config.write(open(self.resolv_file, 'w'))
+
+        return True

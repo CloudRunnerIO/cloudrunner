@@ -357,6 +357,12 @@ class AgentNode(Daemon):
             proc_iter = iter(proc.run(command, lang, env, inlines=incl_header))
             proc = next(proc_iter)
 
+            def _encode(data):
+                try:
+                    return json.dumps(data)
+                except:
+                    return ""
+
             if not isinstance(proc, list):
                 proc.set_input_fd(self.queue)
 
@@ -395,17 +401,21 @@ class AgentNode(Daemon):
                         if fd_type == proc.STDOUT:
                             data = proc.read_out()
                             if data:
-                                self._yield_reply(
-                                    StatusCodes.STDOUT,
-                                    proc.run_as,
-                                    json.dumps(dict(stdout=data)))
+                                enc_data = _encode(dict(stdout=data))
+                                if enc_data:
+                                    self._yield_reply(
+                                        StatusCodes.STDOUT,
+                                        proc.run_as,
+                                        enc_data)
                         if fd_type == proc.STDERR:
                             data = proc.read_err()
                             if data:
-                                self._yield_reply(
-                                    StatusCodes.STDERR,
-                                    proc.run_as,
-                                    json.dumps(dict(stderr=data)))
+                                enc_data = _encode(dict(stderr=data))
+                                if enc_data:
+                                    self._yield_reply(
+                                        StatusCodes.STDERR,
+                                        proc.run_as,
+                                        enc_data)
 
                 run_as, ret_code, stdout, stderr, env = next(proc_iter)
             else:

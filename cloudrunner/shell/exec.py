@@ -23,10 +23,12 @@ try:
 except ImportError:
     pass
 import argparse
+import errno
 import json
 import logging
 import os
 from select import select
+from select import error as sel_err
 import socket
 import sys
 
@@ -510,6 +512,23 @@ class Shell(object):
         if self.args.task == 'delete':
             self.backend.peer_store.remove(common_name=self.args.name)
 
+    def hosts(self):
+        self._create_backend()
+        if self.args.task == 'list':
+            # List hosts
+            mappings = self.backend.host_resolver.mappings()
+            for target, hosts in mappings.items():
+                console.green("[%s]" % target, bold=1)
+                for host in hosts:
+                    console.yellow("%-20s" % host)
+        if self.args.task == 'add':
+            self.backend.host_resolver.add(self.args.mapping,
+                                           self.args.name, self.args.host)
+        if self.args.task == 'delete':
+            if not self.backend.host_resolver.remove(self.args.mapping,
+                                                     self.args.host):
+                console.red("Not removed")
+
     @needs_config
     def run(self, detach=False):
         req = self._request()
@@ -541,7 +560,7 @@ class Shell(object):
             if self.args.test:
                 req.append(test=True)
 
-            req.append(timeout=self.timeout)
+        req.append(timeout=self.timeout)
 
         script_content = parser.CRN_SHEBANG.sub("", script_content)
 
@@ -695,7 +714,12 @@ class ResultPrinter(object):
 
         while self.running:
             try:
-                ready = select([sock_fd], [], [], 1)[0]
+                try:
+                    ready = select([sock_fd], [], [], 1)[0]
+                except sel_err, err:
+                    if  err[0] != errno.EINTR:
+                        raise
+                    ready = {}
                 if sock_fd in ready:
                     parse_result(self.msg_queue)
 
@@ -817,17 +841,18 @@ def _parser():
                                          'Master.\nCould be set as env variable '
                                          'CLOUDRUNNER_TOKEN instead.')
 
-        tout_arg = _common.add_argument('-t', '--timeout', default=60,
-                                        help='Timeout to expect result from '
-                                        'Master in seconds.\nDefault is'
-                                        ' %(default)s seconds.\n'
-                                        'Set -1 for a persistent job')
-
         _common.add_argument('-v', '--verbose', action='store_true',
                              help="Show verbose info")
         _common.add_argument('-#', '--tag', action="append", dest="tags",
                              help='Label runs with tags. '
                              'Allows multiple values')
+
+    tout_arg = _common.add_argument('-t', '--timeout', default=60,
+                                    help='Timeout to expect result from '
+                                    'Master in seconds.\nDefault is'
+                                    ' %(default)s seconds.\n'
+                                    'Set -1 for a persistent job')
+
 
     conf_arg = _common.add_argument('-c', '--config',
                                     default=None,
@@ -903,20 +928,49 @@ def attach_standalone_options(controllers, _common):
     details = controllers.add_parser('details', parents=[_common],
                                      help="Display current configuration")
 
-    peers = controllers.add_parser('peers',
-                                   help="Display current configuration")
+    if CONFIG.security.peer_cache:
+        peers = controllers.add_parser('peers',
+                                       help="Perform action on remote peers")
 
-    peer_tasks = peers.add_subparsers(dest='task',
-                                      help="Perform tasks on peers")
+        peer_tasks = peers.add_subparsers(dest='task',
+                                          help="Perform tasks on peers")
 
-    peer_tasks.add_parser('list', parents=[_common],
-                          help="List registered peers")
+        peer_tasks.add_parser('list', parents=[_common],
+                              help="List registered peers")
 
-    delete = peer_tasks.add_parser('delete', parents=[_common],
-                                   help="Delete a registered peer")
+        delete = peer_tasks.add_parser('delete', parents=[_common],
+                                       help="Delete a registered peer")
 
-    delete.add_argument('-n', '--name', required=True,
-                        help="Peer name")
+        delete.add_argument('-n', '--name', required=True,
+                            help="Peer name")
+
+    if CONFIG.host_resolver:
+        hosts = controllers.add_parser('hosts',
+                                       help="Perform actions on host mappings")
+
+        hosts = hosts.add_subparsers(dest='task',
+                                          help="Perform tasks on hosts")
+
+        hosts.add_parser('list', parents=[_common],
+                         help="List all host mappings")
+
+        add = hosts.add_parser('add', parents=[_common],
+                               help="Add a new mapping")
+
+        add.add_argument('-m', '--mapping', required=True, help="Mapping name")
+
+        add.add_argument('-n', '--name', required=True,
+                         help="Unique name for identification")
+
+        add.add_argument('-i', '--host', required=True, help="host name")
+
+        delete = hosts.add_parser('delete', parents=[_common],
+                                  help="Delete a host mapping")
+
+        delete.add_argument('-m', '--mapping', required=True,
+                            help="Mapping name")
+
+        delete.add_argument('-i', '--host', required=True, help="host name")
 
 
 def attach_server_options(controllers, _common, user_arg, token_arg, server):

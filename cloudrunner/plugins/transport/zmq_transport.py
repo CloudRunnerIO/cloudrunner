@@ -75,7 +75,6 @@ class ZmqCliTransport(TransportBackend):
         self.ssl_key = kwargs.get("ssl_key")
         self.cert_pass = kwargs.get("cert_pass")
         self.peer_cache = kwargs.get("peer_cache")
-        self.host_resolver_conf = kwargs.get("host_resolver")
 
         if self.ssl_cert and \
                 os.path.exists(self.ssl_cert):
@@ -94,6 +93,12 @@ class ZmqCliTransport(TransportBackend):
                                                'cloudrunner-cli',
                                                'peer_cache.db')
             self.peer_store = CertStore(self.peer_cache)
+
+            host_resolver_uri = kwargs.get("host_resolver")
+            if host_resolver_uri:
+                self.host_resolver = HostResolver(host_resolver_uri)
+            else:
+                self.host_resolver = None
 
     def loop(self):
         ioloop.IOLoop.instance().start()
@@ -165,11 +170,6 @@ class ZmqCliTransport(TransportBackend):
         poller = zmq.Poller()
         poller.register(dispatcher, zmq.POLLIN)
         poller.register(worker, zmq.POLLIN)
-
-        if self.host_resolver_conf:
-            host_resolver = HostResolver(self.host_resolver_conf)
-        else:
-            host_resolver = None
 
         def router():
             LOGC.debug("Starting router")
@@ -287,7 +287,7 @@ class ZmqCliTransport(TransportBackend):
                                           self.router_uri,
                                           session_worker_uri,
                                           content, self.stopped,
-                                          host_resolver=host_resolver,
+                                          host_resolver=self.host_resolver,
                                           **kwargs)
                         self.sessions[session.session_id] = session
                         self.curr_session = session.session_id
@@ -374,7 +374,10 @@ class ZmqCliTransport(TransportBackend):
             else:
                 sock.close()
         if force:
-            self.context.term()
+            try:
+                self.context.term()
+            except KeyboardInterrupt:
+                exit(0)
 
     def configure(self, overwrite=False, **kwargs):
         config = Config(CONFIG_SHELL_LOC)

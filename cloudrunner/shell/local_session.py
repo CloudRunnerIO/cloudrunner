@@ -71,22 +71,7 @@ class Session(Thread):
             target_str = parser.parse_selectors(targets)[0]
             targets = target_str.split()
 
-            target_uris = []
-            for target in targets:
-                try:
-                    host = gethostbyname(target)
-                    target_uris.append((target, host))
-                except Exception, ex:
-                    # Try the resolvehost.conf file
-                    if self.host_resolver and target in self.host_resolver:
-                        hosts = self.host_resolver[target]
-                        for host in hosts:
-                            target_uris.append((target, host))
-                    else:
-                        LOG.warn("Cannot resolve hostname: %s" % target)
-                        continue
-
-            self.steps.append((target_str, target_uris, section,
+            self.steps.append((target_str, targets, section,
                                kwargs.get("includes")))
 
     def run(self):
@@ -149,13 +134,28 @@ class Session(Thread):
         finally:
             self.close()
 
-    def execute_step(self, env, targets, hosts, script, libs):
+    def execute_step(self, env, targets, targets_uris, script, libs):
         # 2 sec default
         job_id = uuid.uuid4().hex
         #discovery_time = float(self.config.discovery_time or 1)
         start_time = time.time()
         end_discovery_time = start_time + 3
         node_map = {}
+
+        hosts = []
+        for target in targets_uris:
+            try:
+                host = gethostbyname(target)
+                hosts.append((target, host))
+            except Exception, ex:
+                # Try the resolvehost.conf file
+                if self.host_resolver and target in self.host_resolver:
+                    _hosts = self.host_resolver[target]
+                    for host in _hosts:
+                        hosts.append((target, host))
+                else:
+                    LOG.warn("Cannot resolve hostname: %s" % target)
+                    continue
 
         try:
             num_nodes = 0
@@ -201,7 +201,8 @@ class Session(Thread):
                                             remote_user=job_rep.run_as,
                                             stdout='',
                                             stderr=''))
-                state['data'].update(job_rep.data)
+                if job_rep.data:
+                    state['data'].update(job_rep.data)
 
                 if job_rep.control == StatusCodes.FINISHED:
                     # frames[4]

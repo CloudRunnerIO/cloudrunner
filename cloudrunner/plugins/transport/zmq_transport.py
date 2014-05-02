@@ -40,6 +40,7 @@ from cloudrunner.plugins.transport.base import (TransportBackend,
 from cloudrunner.core.exceptions import Unauthorized
 from cloudrunner.util.cert_store import CertStore
 from cloudrunner.util.config import Config
+from cloudrunner.util.net import HostResolver
 from cloudrunner.util.tlszmq import TLSZmqClientSocket
 from cloudrunner.util.string import stringify
 
@@ -53,7 +54,7 @@ class ZmqCliTransport(TransportBackend):
     proto = 'zmq+ssl'
     config_options = ["node_id", "master_pub", "master_repl",
                       "worker_count", "sock_dir", "security.server",
-                      "security.ssl_cert",  "security.ssl_key",
+                      "security.ssl_cert",  "security.ssl_key", "host_resolver",
                       "security.cert_pass", "security.peer_cache", "mode"]
 
     def __init__(self, mode=None, dispatcher_uri=None, **kwargs):
@@ -74,6 +75,7 @@ class ZmqCliTransport(TransportBackend):
         self.ssl_key = kwargs.get("ssl_key")
         self.cert_pass = kwargs.get("cert_pass")
         self.peer_cache = kwargs.get("peer_cache")
+        self.host_resolver_conf = kwargs.get("host_resolver")
 
         if self.ssl_cert and \
                 os.path.exists(self.ssl_cert):
@@ -164,6 +166,11 @@ class ZmqCliTransport(TransportBackend):
         poller.register(dispatcher, zmq.POLLIN)
         poller.register(worker, zmq.POLLIN)
 
+        if self.host_resolver_conf:
+            host_resolver = HostResolver(self.host_resolver_conf)
+        else:
+            host_resolver = None
+
         def router():
             LOGC.debug("Starting router")
 
@@ -215,16 +222,17 @@ class ZmqCliTransport(TransportBackend):
                         frames = router_sock.recv_multipart()
                         target = frames.pop(0)
                         ip = frames.pop(0)
+                        if ":" not in ip:
+                            # Use default port
+                            ip = "%s:5552" % ip
+                        ip = "tcp://%s" % ip
                         if target not in remote_socks:
                             proxy_sock = self.context.socket(zmq.DEALER)
                             proxy_sock.setsockopt(zmq.IDENTITY, frames[1])
                             uri = ssl_proxy_uri % target
                             proxy_sock.bind(uri)
                             ssl_socket = TLSZmqClientSocket(
-                                self.context,
-                                'tcp://%s:5552' % ip,
-                                uri,
-                                self.ssl_thread_event,
+                                self.context, ip, uri, self.ssl_thread_event,
                                 route_packets=False,
                                 bind_socket=False,
                                 cert=self.ssl_cert,
@@ -279,6 +287,7 @@ class ZmqCliTransport(TransportBackend):
                                           self.router_uri,
                                           session_worker_uri,
                                           content, self.stopped,
+                                          host_resolver=host_resolver,
                                           **kwargs)
                         self.sessions[session.session_id] = session
 
@@ -387,6 +396,19 @@ class ZmqCliTransport(TransportBackend):
             config.update("Security", "peer_cache", self.peer_cache)
             # Create
             CertStore(self.peer_cache)
+
+        if not config.host_resolver:
+            host_resolver_file = os.path.join(conf_dir, 'host_resolver.conf')
+            try:
+                # Create
+                resolver = HostResolver(host_resolver_file)
+                resolver.add('#host_name', "127.0.0.1:12345")
+                config.update("General",
+                              "host_resolver",
+                              host_resolver_file)
+            except Exception, ex:
+                print "ERR", ex
+                pass
 
         ssl_cert = os.path.join(cert_dir, 'cloudrunner.crt')
         ssl_key = os.path.join(cert_dir, 'cloudrunner.key')

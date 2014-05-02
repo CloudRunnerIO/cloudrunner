@@ -37,7 +37,7 @@ LOG = logging.getLogger('LocalSession')
 class Session(Thread):
 
     def __init__(self, ctx, worker_sock_uri, repl_uri, script, run_event,
-                 timeout=None, **kwargs):
+                 timeout=None, host_resolver=None, **kwargs):
         self.session_id = uuid.uuid4().hex
         self.worker_sock = ctx.socket(zmq.DEALER)
         self.worker_sock.setsockopt(zmq.IDENTITY, self.session_id)
@@ -49,6 +49,7 @@ class Session(Thread):
         self.ctx = ctx
         self.reply_sock = ctx.socket(zmq.DEALER)
         self.reply_sock.connect(repl_uri)
+        self.host_resolver = host_resolver
 
         super(Session, self).__init__()
 
@@ -75,8 +76,12 @@ class Session(Thread):
                 try:
                     host = gethostbyname(target)
                 except Exception, ex:
-                    LOG.warn("Cannot resolve hostname: %s" % target)
-                    continue
+                    # Try the resolvehost.conf file
+                    if self.host_resolver and target in self.host_resolver:
+                        host = self.host_resolver[target]
+                    else:
+                        LOG.warn("Cannot resolve hostname: %s" % target)
+                        continue
 
                 target_uris.append((target, host))
             self.steps.append((target_str, target_uris, section,

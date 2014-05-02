@@ -42,31 +42,31 @@ class Mapper(object):
     __getitem__ = __getattr__
 
 
-class Config(Mapper):
+class ConfigBase(Mapper):
+
+    class Section(Mapper):
+
+        def __init__(self, config, section):
+            self._config = config
+            self._section = section
+
+        def items(self):
+            try:
+                return self._config.items(self._section)
+            except:
+                LOG.debug("No section %s found in %s" %
+                         (self._section, config_file))
+                return {}
 
     def __init__(self, config_file):
         self._fn = config_file
         self.reload()
         self._section = 'General'
 
-        class Section(Mapper):
+        self.configure()
 
-            def __init__(self, config, section):
-                self._config = config
-                self._section = section
-
-            def items(self):
-                try:
-                    return self._config.items(self._section)
-                except:
-                    LOG.debug("No section %s found in %s" %
-                            (self._section, config_file))
-                    return {}
-
-        self.security = Section(self._config, 'Security')
-        self.users = Section(self._config, 'Users')
-        self.plugins = Section(self._config, 'Plugins')
-        self.run_as = Section(self._config, 'Run_as')
+    def add_section(self, name, section_name):
+        setattr(self, name, self.Section(self._config, section_name))
 
     def __str__(self):
         return "Config(%s)" % self._fn
@@ -91,9 +91,21 @@ class Config(Mapper):
             else:
                 raise
 
+    def configure(self):
+        pass
+
     def reload(self):
         self._config = ConfigParser.ConfigParser()
         try:
             self._config.read(self._fn)
         except Exception, ex:
             print "Config not found %s" % ex
+
+
+class Config(ConfigBase):
+
+    def configure(self):
+        self.add_section("security", "Security")
+        self.add_section("users", "Users")
+        self.add_section("plugins", "Plugins")
+        self.add_section("run_as", "Run_as")

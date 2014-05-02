@@ -363,8 +363,7 @@ class NodeTransport(TransportBackend):
         x509.save_pem(crt_file)
 
         print("Updating config settings")
-        if not kwargs.get("node_id"):
-            config.update('General', 'node_id', self.node_id)
+        config.update('General', 'node_id', subj.CN)
         if not kwargs.get("master_repl"):
             config.update('General', 'master_repl', "0.0.0.0:5552")
         if not kwargs.get("user_store"):

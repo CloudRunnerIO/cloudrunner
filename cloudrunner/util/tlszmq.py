@@ -332,7 +332,12 @@ class TLSZmqClientSocket(object):
                                 cert_password=self.cert_password)
 
         self.zmq_socket = self.context.socket(zmq.DEALER)
-        self.zmq_socket.connect(self.ssl_socket_uri)
+        try:
+            self.zmq_socket.connect(self.ssl_socket_uri)
+        except Exception, ex:
+            LOGC.error(
+                "Cannot connect to %s: [%s]" % (self.ssl_socket_uri, ex))
+            raise
         self.poller.register(self.zmq_socket, zmq.POLLIN)
         self.init.set()
 

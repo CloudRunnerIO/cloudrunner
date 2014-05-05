@@ -576,7 +576,7 @@ class Shell(object):
                 console.green("Running local script", bold=1)
                 console.green("=" * 80)
                 from cloudrunner.core.process import Processor
-                processor = Processor(CONFIG, "@")
+                processor = Processor("@")
                 lang = parser.parse_lang(first_section)
                 proc_iter = iter(processor.run(first_section, lang, self.env))
                 proc = next(proc_iter)
@@ -686,6 +686,7 @@ class ResultPrinter(object):
     def __init__(self, msg_queue):
         self.msg_queue = msg_queue
         self.running = True
+        self.last_line, self.last_node = None, None
 
     def unpack(self, count, frames):
         l = list(frames[:count])
@@ -717,7 +718,7 @@ class ResultPrinter(object):
                 try:
                     ready = select([sock_fd], [], [], 1)[0]
                 except sel_err, err:
-                    if  err[0] != errno.EINTR:
+                    if err[0] != errno.EINTR:
                         raise
                     ready = {}
                 if sock_fd in ready:
@@ -785,7 +786,10 @@ class ResultPrinter(object):
 
     def print_partial(self, run_id, time, caller, owner, org, targets, tags,
                       job_id, run_as, node=None, stdout=None, stderr=None):
-        console.blue('*' * 4, job_id, ':', node, run_as, '*' * 4, bold=1)
+        if self.last_line != job_id or self.last_node != node:
+            console.blue('*' * 4, job_id, ':', node, run_as, '*' * 4, bold=1)
+        self.last_line = job_id
+        self.last_node = node
         if stdout:
             console.log(stdout)
         if stderr:
@@ -852,7 +856,6 @@ def _parser():
                                     'Master in seconds.\nDefault is'
                                     ' %(default)s seconds.\n'
                                     'Set -1 for a persistent job')
-
 
     conf_arg = _common.add_argument('-c', '--config',
                                     default=None,

@@ -50,6 +50,11 @@ from cloudrunner.util.shell import Console
 from cloudrunner.util.http import load_from_link
 from cloudrunner.util.http import parse_url
 
+try:
+    import readline
+except ImportError:
+    pass
+
 CONFIG = Config(CONFIG_SHELL_LOC)
 PLUGINS = {}
 LIBRARY_ITEM = re.compile(r'\[\w*\]\://')
@@ -77,7 +82,6 @@ class ShellRunner(object):
     """
 
     def __init__(self, *args, **kwargs):
-
         self._parser = _parser()
 
         try:
@@ -151,9 +155,40 @@ class Shell(cmd.Cmd):
         self.last_options = ""
         self.running = False
         self.lang = 'bash'
+        self.save_history = False
 
         self._api = None
+
         assert self.api
+
+    def preloop(self):
+        try:
+            histfile = os.environ.get("CLOUDRUNNER_HISTFILE")
+            if histfile:
+                readline.read_history_file(histfile)
+                self.save_history = True
+            histsize = os.environ.get("CLOUDRUNNER_HISTSIZE", 10000)
+            readline.set_history_length(histsize)
+        except Exception, ex:
+            pass
+
+    def postloop(self):
+        try:
+            if self.save_history:
+                histfile = os.environ.get("CLOUDRUNNER_HISTFILE")
+                if histfile:
+                    readline.write_history_file(histfile)
+        except Exception, ex:
+            pass
+
+    def precmd(self, line):
+        if line and self.save_history:
+            last = readline.get_history_item(
+                readline.get_current_history_length())
+            if last != line:
+                # only unique
+                readline.add_history(line)
+        return line
 
     @property
     def nodes(self):
@@ -447,7 +482,7 @@ class Shell(cmd.Cmd):
 
                 if job_id != cur_job_id:
                     console.green("========== JOB: @%s %s ==========" % (
-                        msg.run_as, job_id[:8]))
+                        msg.run_as, job_id))
                     cur_job_id = job_id
 
                 if msg.node != last_node:

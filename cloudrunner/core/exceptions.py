@@ -17,9 +17,18 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+
 class ConnectionError(Exception):
     pass
 
 
 class Unauthorized(Exception):
+    pass
+
+
+class InterruptStep(Exception):
+    pass
+
+
+class InterruptExecution(Exception):
     pass

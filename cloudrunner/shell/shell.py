@@ -156,7 +156,7 @@ class Shell(cmd.Cmd):
         self.running = False
         self.lang = 'bash'
         self.save_history = False
-
+        self.runtime_history = []
         self._api = None
 
         assert self.api
@@ -167,28 +167,17 @@ class Shell(cmd.Cmd):
             if histfile:
                 readline.read_history_file(histfile)
                 self.save_history = True
-            histsize = os.environ.get("CLOUDRUNNER_HISTSIZE", 10000)
-            readline.set_history_length(histsize)
+                histsize = os.environ.get("CLOUDRUNNER_HISTSIZE", 10000)
+                readline.set_history_length(histsize)
         except Exception, ex:
+            print ex
             pass
 
-    def postloop(self):
-        try:
-            if self.save_history:
-                histfile = os.environ.get("CLOUDRUNNER_HISTFILE")
-                if histfile:
-                    readline.write_history_file(histfile)
-        except Exception, ex:
-            pass
-
-    def precmd(self, line):
-        if line and self.save_history:
-            last = readline.get_history_item(
-                readline.get_current_history_length())
-            if last != line:
-                # only unique
-                readline.add_history(line)
-        return line
+    def _save_history(self):
+        if self.save_history:
+            histfile = os.environ.get("CLOUDRUNNER_HISTFILE")
+            if histfile:
+                readline.write_history_file(histfile)
 
     @property
     def nodes(self):
@@ -227,6 +216,7 @@ class Shell(cmd.Cmd):
         if line == "EOF":
             return self.do_quit(line)
         self.buffer.append(line)
+        self.runtime_history.append(line)
         if self.target == "local":
             return self.do_run("")
 
@@ -244,6 +234,10 @@ class Shell(cmd.Cmd):
             colors.yellow("python")
         console.yellow("Choose from bash, sh, python, perl, "
                        "ruby, nodejs, puppet")
+
+    def do_history(self, arg):
+        console.yellow("Execution history:", bold=1)
+        console.white("\n".join(self.runtime_history))
 
     def do_lang(self, line):
         if not line:
@@ -269,6 +263,7 @@ class Shell(cmd.Cmd):
 
     def do_switch(self, target):
         """Switch CloudRunner target"""
+        self.runtime_history.append("#! switch %s" % target)
         if not target:
             self.target = "local"
         else:
@@ -280,6 +275,11 @@ class Shell(cmd.Cmd):
 
     def do_quit(self, arg):
         print
+        try:
+            if self.save_history:
+                self._save_history()
+        except Exception, ex:
+            pass
         self.api.transport.terminate(force=True)
         return True
 
@@ -431,14 +431,15 @@ class Shell(cmd.Cmd):
             # Nothing to run
             return
 
+        self._save_history()
+
         options = []
         if line.strip():
             _opts = [opt.strip() for opt in line.split()]
             for _opt in _opts:
                 k, _, v = _opt.partition("=")
                 if k and v:
-                    if k == "--resume":
-                        options.append('--resume=%s' % v)
+                    options.append(_opt)
         elif hasattr(self, "last_session_id"):
             options.append('--resume=%s' % self.last_session_id)
 

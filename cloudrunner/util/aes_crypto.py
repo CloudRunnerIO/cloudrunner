@@ -17,7 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import random
+from os import urandom
 import M2Crypto as m
 from base64 import (b64encode, b64decode)
 
@@ -29,14 +29,12 @@ class Crypter(object):
 
     def __init__(self, key=None, iv=None):
         if not key:
-            self._aes_key = ''.join(chr(random.randint(0, 0xFF))
-                                    for i in range(32))
+            self._aes_key = urandom(32)
         else:
             self._aes_key = b64decode(key)
 
         if not iv:
-            self._aes_iv = ''.join(chr(random.randint(0, 0xFF))
-                                   for i in range(16))
+            self._aes_iv = urandom(16)
         else:
             self._aes_iv = b64decode(iv)
 

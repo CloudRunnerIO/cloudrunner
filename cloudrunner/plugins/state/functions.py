@@ -447,9 +447,14 @@ def __enter(_env):
         if k == ENV_FILE_NAME:
             os.environ[k] = env[ENV_FILE_NAME]
             continue
+        if k in SPECIAL:
+            # No special processing here
+            os.environ[k] = v
+            continue
         if not isinstance(v, list):
-            v = [v]
-        os.environ[k] = StringProxy(v)
+            os.environ[k] = v
+        else:
+            os.environ[k] = StringProxy(v)
     global __env__old__items
     __env__old__items = os.environ.items()
 

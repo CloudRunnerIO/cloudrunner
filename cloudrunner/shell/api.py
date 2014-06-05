@@ -58,7 +58,7 @@ class AsyncRespLocal(object):
 
     def __init__(self, caller, run_wrap):
         self.run_wrap = run_wrap
-        self.env = {}
+        self.env = caller.env or {}
         self.caller = caller
 
     def iter(self, timeout=5):
@@ -100,7 +100,7 @@ class AsyncRespLocal(object):
             run_as, ret_code, stdout, stderr, env = proc
 
         self.env = env
-        self.caller.env = env
+        self.caller.env.update(env)
 
 
 class CloudRunner(object):

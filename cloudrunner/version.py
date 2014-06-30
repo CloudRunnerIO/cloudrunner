@@ -17,4 +17,4 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-VERSION = '0.5'
+VERSION = '0.6'

@@ -29,7 +29,6 @@ import logging
 import os
 from select import select
 from select import error as sel_err
-import socket
 import sys
 
 from cloudrunner import CONFIG_SHELL_LOC
@@ -230,7 +229,7 @@ class Shell(object):
                                                         **kwargs)
                 if status != 0:
                     console.red("Error reading script from address.",
-                                "Server returned code:", status, script)
+                                "Server returned code:", status)
                     exit(1)
             elif not os.path.exists(_script):
                 console.red("Script %s doesn't exist" % _script)
@@ -626,7 +625,6 @@ class Shell(object):
             console.green("Remote execution", bold=1)
             console.green("=" * 80)
 
-            session_id = None
             self.renderer.capture(notify=self.notify,
                                   terminate=self.terminate)
         else:
@@ -727,10 +725,11 @@ class ResultPrinter(object):
             except KeyboardInterrupt:
                 console.green("\nChoose exit option:")
                 if self.session_id:
-                    console.green("\t[s]end input data for remote process\n"
-                                  "\t[t]erminate the remote process(es) [SIGTERM]\n"
-                                  "\t[k]ill the remote process(es) [SIGKILL]\n"
-                                  "\t[c]ontinue execution or [e]xit the program")
+                    console.green(
+                        "\t[s]end input data for remote process\n"
+                        "\t[t]erminate the remote process(es) [SIGTERM]\n"
+                        "\t[k]ill the remote process(es) [SIGKILL]\n"
+                        "\t[c]ontinue execution or [e]xit the program")
                 choice = None
                 try:
                     choice = raw_input()
@@ -798,7 +797,7 @@ class ResultPrinter(object):
     def print_final(self, results):
         console.yellow("=" * 30, "Job stats:", "=" * 30, bold=True)
         for result in results:
-            #console.blue("Run Id: ", result.get('run_id', ''), bold=1)
+            # console.blue("Run Id: ", result.get('run_id', ''), bold=1)
             console.blue("#! switch [", result['targets'], "] @",
                          result['jobid'], bold=1)
             if result.get('args', False):
@@ -831,19 +830,20 @@ def _parser():
             'dispatcher_uri=tcp://server:port\n\n'
             'or as env variable CLOUDRUNNER_SERVER')
 
-        user_arg = _common.add_argument('-u', '--user',
-                                        default=os.environ.get(
-                                        'CLOUDRUNNER_USER', None),
-                                        help='User name to authenticate at '
-                                        'Master.\nCould be set as env variable '
-                                        'CLOUDRUNNER_USER instead.')
+        user_arg = _common.add_argument(
+            '-u', '--user', default=os.environ.get(
+                'CLOUDRUNNER_USER', None),
+            help='User name to authenticate at '
+            'Master.\nCould be set as env variable '
+            'CLOUDRUNNER_USER instead.')
 
-        token_arg = _common.add_argument('-p', '--pass', dest='token',
-                                         default=os.environ.get(
-                                         'CLOUDRUNNER_TOKEN', None),
-                                         help='Password/Token authenticate at '
-                                         'Master.\nCould be set as env variable '
-                                         'CLOUDRUNNER_TOKEN instead.')
+        token_arg = _common.add_argument(
+            '-p', '--pass', dest='token',
+            default=os.environ.get(
+                'CLOUDRUNNER_TOKEN', None),
+            help='Password/Token authenticate at '
+            'Master.\nCould be set as env variable '
+            'CLOUDRUNNER_TOKEN instead.')
 
         _common.add_argument('-v', '--verbose', action='store_true',
                              help="Show verbose info")
@@ -851,17 +851,17 @@ def _parser():
                              help='Label runs with tags. '
                              'Allows multiple values')
 
-    tout_arg = _common.add_argument('-t', '--timeout', default=60,
-                                    help='Timeout to expect result from '
-                                    'Master in seconds.\nDefault is'
-                                    ' %(default)s seconds.\n'
-                                    'Set -1 for a persistent job')
+    _common.add_argument('-t', '--timeout', default=60,
+                         help='Timeout to expect result from '
+                         'Master in seconds.\nDefault is'
+                         ' %(default)s seconds.\n'
+                         'Set -1 for a persistent job')
 
-    conf_arg = _common.add_argument('-c', '--config',
-                                    default=None,
-                                    help='Path to a config file.\n'
-                                    'Defaults to %s seconds.' %
-                                    CONFIG_SHELL_LOC)
+    _common.add_argument('-c', '--config',
+                         default=None,
+                         help='Path to a config file.\n'
+                         'Defaults to %s seconds.' %
+                         CONFIG_SHELL_LOC)
 
     controllers = _parser.add_subparsers(dest='controller',
                                          help='Shell commands')
@@ -928,8 +928,8 @@ def attach_standalone_options(controllers, _common):
     configure.add_argument('-o', '--overwrite', action='store_true',
                            help="Overwrite existing configuration")
 
-    details = controllers.add_parser('details', parents=[_common],
-                                     help="Display current configuration")
+    controllers.add_parser('details', parents=[_common],
+                           help="Display current configuration")
 
     if CONFIG.security.peer_cache:
         peers = controllers.add_parser('peers',
@@ -1135,8 +1135,8 @@ def attach_server_options(controllers, _common, user_arg, token_arg, server):
     dynamic_loader(None, None)
 
     # Nodes
-    list_nodes = controllers.add_parser('list_nodes', parents=[_common],
-                                        help='List nodes on master')
+    controllers.add_parser('list_nodes', parents=[_common],
+                           help='List nodes on master')
 
     controllers.add_parser('list_active_nodes',
                            parents=[_common],

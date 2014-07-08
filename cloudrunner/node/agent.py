@@ -41,26 +41,19 @@ try:
 except ImportError:
     pass
 import argparse
-import argparse
 import json
 import os
 import signal
-import socket
 from threading import Thread
 from threading import Event
-import time
-import sys
 
 from cloudrunner.core import parser
 from cloudrunner.core.exceptions import ConnectionError
-from cloudrunner.core.message import RegisterRep
-from cloudrunner.core.message import ADMIN_TOWER
 from cloudrunner.core.message import StatusCodes
 from cloudrunner.core.process import Processor
 from cloudrunner.node.matcher import Matcher
 from cloudrunner.plugins.transport.base import TransportBackend
 from cloudrunner.util.daemon import Daemon
-from cloudrunner.util.loader import load_plugins
 from cloudrunner.util.loader import load_plugins_from
 from cloudrunner.util.shell import colors
 from cloudrunner.util.validator import validate_address
@@ -101,8 +94,9 @@ class AgentNode(Daemon):
                 break
 
         if not self.transport_class:
-            print colors.red("Cannot find transport class %s from module %s" %
-                            (klass, mod))
+            print colors.red(
+                "Cannot find transport class %s from module %s" % (klass,
+                                                                   mod))
             exit(1)
 
         assert self.transport_class
@@ -263,15 +257,6 @@ class AgentNode(Daemon):
         signal.signal(signal.SIGTERM, self._sig_term)
         LOG.info("Exiting Node, current sessions: %s" % self.sessions)
         self.backend.terminate()
-
-    class Dispatcher(Thread):
-
-        def __init__(self, backend):
-            control_queue = backend.publish_queue('dispatcher')
-            super(AgentNode.Dispatcher, self).__init__()
-
-        def run(self):
-            pass
 
     class Session(Thread):
 
@@ -481,11 +466,12 @@ def _parser():
         description="CloudRunner Node tool",
         formatter_class=argparse.RawTextHelpFormatter)
 
-    actions = parser.add_subparsers(dest="action",
-                                    help='Apply action on the daemonized process\n'
-                                    'For the actions [start, stop, restart] - pass a pid file\n'
-                                    'Configure - performs initial configuration\n'
-                                    'Run - start process in debug mode\n')
+    actions = parser.add_subparsers(
+        dest="action",
+        help='Apply action on the daemonized process\n'
+        'For the actions [start, stop, restart] - pass a pid file\n'
+        'Configure - performs initial configuration\n'
+        'Run - start process in debug mode\n')
 
     _common_run = argparse.ArgumentParser(add_help=False)
 
@@ -556,8 +542,8 @@ def _parser():
         unregister_cli = actions.add_parser('unregister_cli')
         unregister_cli.add_argument('-cn', '--common-name',
                                     help='Common name of the certificate'
-                                    'to be removed as listed in subject. Use:\n'
-                                    '\tcloudrunner-exec details\n'
+                                    'to be removed as listed in subject. '
+                                    'Use:\n\tcloudrunner-exec details\n'
                                     'to find the fingerprint')
 
         unregister_cli.add_argument('-fp', '--fingerprint',
@@ -566,7 +552,7 @@ def _parser():
                                     '\tcloudrunner-exec details\n'
                                     'to find the fingerprint')
 
-        list_cli = actions.add_parser('list_cli')
+        actions.add_parser('list_cli')
 
     return parser
 

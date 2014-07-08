@@ -23,9 +23,6 @@ import stat
 from StringIO import StringIO
 from subprocess import Popen
 from subprocess import PIPE
-import threading
-
-from cloudrunner.core.message import StatusCodes
 
 MOD_MAP = {
     # Owner
@@ -61,6 +58,7 @@ class NixProcessor(object):
                 self.as_user = as_user
             self.ready = True
         except Exception, ex:
+            LOG.error(ex)
             LOG.warn("Cannot find local user %s" % as_user)
             self.ready = False
 
@@ -95,7 +93,6 @@ class NixProcessor(object):
             LOG.warning(str(ex))
 
     def popen(self, exec_file_name, session_cwd, env):
-        (stdout, stderr, ret_code) = ("", "", -250)
         proc = Popen(exec_file_name,
                      shell=False,
                      stdin=PIPE,

@@ -54,9 +54,10 @@ class TLSZmqServerSocket(object):
 
         socket      --  Zmq socket to wrap.
 
-        proc_socket_uri  --  Zmq socket to send/recv packets for internal processing.
+        proc_socket_uri  --  Zmq socket to send/recv packets
+                    for internal processing.
 
-        cert        --  Server certificate - PEM-encoded file (e.g. server.crt).
+        cert        --  Server certificate - PEM-encoded file (eg. server.crt)
 
         key         --  Server key - PEM-encoded file(e.g. server.key).
 
@@ -192,7 +193,7 @@ class TLSZmqServerSocket(object):
                         if self.verify_func:
                             x509 = tls.ssl.get_peer_cert()
                             if x509 and \
-                                x509.get_serial_number() not in self.CRL:
+                                    x509.get_serial_number() not in self.CRL:
                                 # auth conn
                                 subj = x509.get_subject()
                                 client_id = subj.CN
@@ -222,11 +223,11 @@ class TLSZmqServerSocket(object):
 
                 if data:
                     tls.send(data)
-                    #LOGS.debug("SENDING DATA: %s" % [repr(ident), data])
+                    # LOGS.debug("SENDING DATA: %s" % [repr(ident), data])
                     try:
                         flushed = tls.update()
                         if self.verify_func and flushed and \
-                            not self.conns[ident].node:
+                                not self.conns[ident].node:
                             LOGS.info("Anon connection, dropping %s" %
                                       repr(ident))
                             # Remove cached ssl obj for unauth reqs
@@ -240,7 +241,7 @@ class TLSZmqServerSocket(object):
                     self.zmq_socket.send_multipart([ident, enc_rep])
             except zmq.ZMQError, zerr:
                 if zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
-                    or zerr.errno == zmq.ENOTSOCK:
+                        or zerr.errno == zmq.ENOTSOCK:
                     # System interrupt
                     break
             except KeyboardInterrupt:
@@ -279,7 +280,7 @@ class TLSZmqClientSocket(object):
 
         stopped_event   --  Event to listen to
 
-        cert        --  Server certificate - PEM-encoded file (e.g. client.crt).
+        cert        --  Server certificate - PEM-encoded file (eg. client.crt)
 
         key         --  Server key - PEM-encoded file(e.g. client.key).
 
@@ -419,7 +420,7 @@ class TLSZmqClientSocket(object):
                 raise
             except zmq.ZMQError, zerr:
                 if zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
-                    or zerr.errno == zmq.ENOTSOCK:
+                        or zerr.errno == zmq.ENOTSOCK:
                     # System interrupt
                     break
                 LOGC.exception(zerr)
@@ -466,8 +467,8 @@ class _TLSZmq(object):
 
         type        --  Type of the instance - 'Server' or 'Client'
 
-        identity    --  unique id of the wrapper. Max length is 32 chars, due to
-                        limitation in OpenSSL. Needed for proper
+        identity    --  unique id of the wrapper. Max length is 32 chars,
+                        due to limitation in OpenSSL. Needed for proper
                         packet handling. Required.
 
         cert        --  Certificate file name. Used on both
@@ -533,7 +534,7 @@ class _TLSZmq(object):
     def _verify_callback(self, ctx, _x509, errnum, depth, ok):
         try:
             x509 = m.X509.X509(_x509)
-        except Exception, ex:
+        except Exception:
             return False
         if hasattr(self, 'verify_cb'):
             ok = self.verify_cb(x509, depth, ok)
@@ -721,8 +722,8 @@ class TLSZmqServer(_TLSZmq):
                         Valid values are: 'sslv3' or 'tlsv1'.
                         Required.
 
-        identity    --  unique id of the wrapper. Max length is 32 chars, due to
-                        limitation in OpenSSL. Needed for proper
+        identity    --  unique id of the wrapper. Max length is 32 chars,
+                        due to limitation in OpenSSL. Needed for proper
                         packet handling. Required.
 
         cert        --  Certificate file name. Mandatory.

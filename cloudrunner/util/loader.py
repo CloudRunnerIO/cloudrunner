@@ -20,10 +20,8 @@
 import imp
 import inspect
 import logging
-import os
 import sys
 
-import cloudrunner
 from cloudrunner.plugins import PLUGIN_BASES
 
 LOG = logging.getLogger('PluginLoader')
@@ -83,7 +81,7 @@ def load_plugins_from(module_str, base_filter):
         mod_name = module_str.rpartition('/')[2]
         mod_name = mod_name.rpartition('.')[0]
         mod_ref = 'cloudrunner.plugins.custom.' + mod_name
-        _module = imp.load_source(mod_ref, module_str)
+        imp.load_source(mod_ref, module_str)
     else:
         tokens = module_str.split('.')
 

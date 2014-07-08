@@ -30,20 +30,14 @@ import json
 import logging
 import os
 import re
-from select import select
 import shlex
-import signal
 import sys
 
 from cloudrunner import CONFIG_SHELL_LOC
 from cloudrunner import LIB_DIR
 from cloudrunner.shell.api import CloudRunner
 from cloudrunner.core import message
-from cloudrunner.core import parser
-from cloudrunner.core.message import StatusCodes
 from cloudrunner.util.config import Config
-from cloudrunner.util.loader import load_plugins
-from cloudrunner.util.loader import local_plugin_loader
 from cloudrunner.util.logconfig import configure_loggers
 from cloudrunner.util.shell import colors
 from cloudrunner.util.shell import Console
@@ -278,7 +272,7 @@ class Shell(cmd.Cmd):
         try:
             if self.save_history:
                 self._save_history()
-        except Exception, ex:
+        except Exception:
             pass
         self.api.transport.terminate(force=True)
         return True
@@ -451,8 +445,7 @@ class Shell(cmd.Cmd):
             includes, args = self._includes()
             if args:
                 options.extend(args)
-            ares = self.api.run_remote(
-                "#!switch[%s] %s\n%s\n\n%s" % (
+            ares = self.api.run_remote("#!switch[%s] %s\n%s\n\n%s" % (
                 self.target,
                 " ".join(options),
                 LANGS[self.lang],
@@ -726,31 +719,33 @@ def _parser():
         'dispatcher_uri=tcp://server:port\n\n'
         'or as env variable CLOUDRUNNER_SERVER')
 
-    user_arg = _common.add_argument('-u', '--user',
-                                    default=os.environ.get(
-                                    'CLOUDRUNNER_USER', None),
-                                    help='User name to authenticate at '
-                                    'Master.\nCould be set as env variable '
-                                    'CLOUDRUNNER_USER instead.')
+    user_arg = _common.add_argument(
+        '-u', '--user',
+        default=os.environ.get(
+            'CLOUDRUNNER_USER', None),
+        help='User name to authenticate at '
+        'Master.\nCould be set as env variable '
+        'CLOUDRUNNER_USER instead.')
 
-    token_arg = _common.add_argument('-p', '--pass', dest='token',
-                                     default=os.environ.get(
-                                     'CLOUDRUNNER_TOKEN', None),
-                                     help='Password/Token authenticate at '
-                                     'Master.\nCould be set as env variable '
-                                     'CLOUDRUNNER_TOKEN instead.')
+    token_arg = _common.add_argument(
+        '-p', '--pass', dest='token',
+        default=os.environ.get(
+            'CLOUDRUNNER_TOKEN', None),
+        help='Password/Token authenticate at '
+        'Master.\nCould be set as env variable '
+        'CLOUDRUNNER_TOKEN instead.')
 
-    tout_arg = _common.add_argument('-t', '--timeout', default=60,
-                                    help='Timeout to expect result from '
-                                    'Master in seconds.\nDefault is'
-                                    ' %(default)s seconds.\n'
-                                    'Set -1 for a persistent job')
+    _common.add_argument('-t', '--timeout', default=60,
+                         help='Timeout to expect result from '
+                         'Master in seconds.\nDefault is'
+                         ' %(default)s seconds.\n'
+                         'Set -1 for a persistent job')
 
-    conf_arg = _common.add_argument('-c', '--config',
-                                    default=None,
-                                    help='Path to a config file.\n'
-                                    'Defaults to %s seconds.' %
-                                    CONFIG_SHELL_LOC)
+    _common.add_argument('-c', '--config',
+                         default=None,
+                         help='Path to a config file.\n'
+                         'Defaults to %s seconds.' %
+                         CONFIG_SHELL_LOC)
 
     _common.add_argument('-v', '--verbose', action='store_true',
                          help="Show verbose info")
@@ -820,8 +815,9 @@ def _parser():
         notify.add_argument('-i', '--inline', action='store_true',
                             help='Pass inline data instead of a file')
 
-        terminate = controllers.add_parser('terminate', parents=[_common],
-                                           help="Terminate running job session")
+        terminate = controllers.add_parser(
+            'terminate', parents=[_common],
+            help="Terminate running job session")
 
         terminate.add_argument('session_id', help="Session ID")
 
@@ -946,8 +942,8 @@ def _parser():
         dynamic_loader(None, None)
 
         # Nodes
-        list_nodes = controllers.add_parser('list_nodes', parents=[_common],
-                                            help='List nodes on master')
+        controllers.add_parser('list_nodes', parents=[_common],
+                               help='List nodes on master')
 
         controllers.add_parser('list_active_nodes',
                                parents=[_common],

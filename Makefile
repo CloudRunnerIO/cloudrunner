@@ -89,3 +89,7 @@ clean:
 	echo "Remove other temporary files..."
 	rm -rf easy_install* src/*.egg-info .coverage
 	rm -rf build
+
+.PHONY: test
+test:
+	$(__python) setup.py test & flake8 cloudrunner

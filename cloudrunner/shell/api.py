@@ -82,11 +82,9 @@ class AsyncRespLocal(object):
 
                         yield message.PipeMessage(
                             session_id="",
-                            task_name="",
+                            step_id=1,
                             user=proc.run_as,
                             org='',
-                            targets="local",
-                            tags='',
                             job_id='local',
                             run_as=proc.run_as,
                             node='localhost',

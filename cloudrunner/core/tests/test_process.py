@@ -17,8 +17,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from mock import patch
-from mock import Mock
 import socket
 import os
 import pwd

@@ -36,7 +36,6 @@ PERM_MAP = {
 def chmod(path, uid, *modes):
     return  # Skip for now
     file_acl = winsec.ACL()
-    mode = 0
     mode_map = {'O': 0, 'G': 0, 'I': 0}
     for m in modes:
         if m.startswith('I'):

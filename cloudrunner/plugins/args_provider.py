@@ -28,6 +28,7 @@ class ArgsProvider(object):
     def append_args(self, arg_parser):
         pass
 
+
 class CliArgsProvider(object):
 
     __metaclass__ = abc.ABCMeta

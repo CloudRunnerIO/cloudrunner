@@ -57,8 +57,8 @@ class StatusCodes(object):
 def is_valid_host(host):
     if not host:
         return False
-    return not filter(lambda x: x.lower() == host.lower(),
-                     (ADMIN_TOWER.lower(), HEARTBEAT.lower()))
+    return not filter(lambda x: x.lower() == host.lower(), (
+        ADMIN_TOWER.lower(), HEARTBEAT.lower()))
 
 
 class BaseMessage(object):
@@ -77,7 +77,7 @@ class BaseMessage(object):
         try:
             obj = cls(*args)
             return obj
-        except Exception, ex:
+        except Exception:
             return False
 
 
@@ -87,7 +87,6 @@ class AgentReq(BaseMessage):
                  data=None, extra_json=None):
         self.login = self._str(login)
         self.password = self._str(password)
-        #assert self.password
         self.auth_type = int(auth_type)
         self.control = self._str(control)
         if data:
@@ -253,7 +252,8 @@ class ClientRep(BaseMessage):
 
 class JobRep(BaseMessage):
 
-    def __init__(self, ident, peer, org, control, run_as=None, data=None, *args):
+    def __init__(self, ident, peer, org, control,
+                 run_as=None, data=None, *args):
         self.ident = ident
         self.peer = peer
         self.org = org
@@ -305,7 +305,7 @@ class TransportMessage(object):
     def default_packer(self, val):
         return stringify1(val)
 
-    def pack(self, proxy, peer):
+    def pack(self):
         # reply: 'PIPE', job_id, run_as, node_id, stdout, stderr
         # reply-fwd: session_id, PIPEOUT, session_id, time,
         #   task_name, user, targets, tags, job_id, run_as,
@@ -318,7 +318,7 @@ class TransportMessage(object):
                                  self.default_packer)(val)
             data.append(packed_val)
 
-        return [proxy, peer] + [json.dumps(data)]
+        return dict([(k, getattr(self, k)) for k in self.pack_order])
 
     @classmethod
     def unpack(cls, status, timestamp, *args):
@@ -345,42 +345,37 @@ class TransportMessage(object):
 
 class PipeMessage(TransportMessage):
     status = StatusCodes.PIPEOUT
-    pack_order = ["session_id", "task_name", "user", "org", "targets",
-                  "tags", "job_id", "run_as", "node", "stdout", "stderr"]
+    pack_order = ["type", "session_id", "step_id", "user", "org", "job_id",
+                  "run_as", "node", "stdout", "stderr"]
 
-    def __init__(self, session_id, task_name, user, org, targets, tags,
-                 job_id, run_as, node, stdout=None, stderr=None):
+    def __init__(self, session_id, step_id, user, org, job_id,
+                 run_as, node, stdout=None, stderr=None):
         self.session_id = session_id
-        self.task_name = task_name
+        self.step_id = step_id
         self.user = user
         self.org = org
-        self.targets = targets
-        self.tags = tags
         self.job_id = job_id
         self.run_as = run_as
         self.node = node
         self.stdout = stdout
         self.stderr = stderr
+        self.type = "PARTIAL"
 
 
 class FinishedMessage(TransportMessage):
     status = StatusCodes.FINISHED
-    pack_order = ["session_id", "task_name", "user", "org",
-                  "tags", "script", "response"]
+    pack_order = ["type", "session_id", "user", "org", "response"]
 
     unpack_functions = {
         "response": json.loads,
     }
 
-    def __init__(self, session_id, task_name, user, org, tags,
-                 script, response):
+    def __init__(self, session_id, user, org, response):
         self.session_id = session_id
-        self.task_name = task_name
         self.user = user
         self.org = org
-        self.tags = tags
-        self.script = script
         self.response = response
+        self.type = "FINISHED"
 
     def pack_response(self, resp):
         return json.dumps(resp)

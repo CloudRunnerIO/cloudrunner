@@ -17,8 +17,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import mock
-
 from cloudrunner.core import message
 from cloudrunner.tests import base
 

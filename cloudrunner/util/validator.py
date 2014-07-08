@@ -23,14 +23,14 @@ import socket
 def validate_address(address):
     try:
         (ip, port) = address.split(':')
-        _ = socket.inet_aton(ip)
+        socket.inet_aton(ip)
         return True
     except ValueError:
         return False
     except socket.error:
         try:
             # *nix only, will throw exception on WIN
-            _ = socket.inet_pton(socket.AF_INET6, ip)
+            socket.inet_pton(socket.AF_INET6, ip)
             return True
         except:
             return False

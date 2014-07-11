@@ -49,7 +49,7 @@ class AsyncResp(object):
 
     def get_message(self, timeout=None):
         frames = self.queue.recv(timeout)
-        LOG.debug("Received frames: %r", frames)
+        LOG.info("Received frames: %r", frames)
         if frames:
             return message.TransportMessage.unpack(*frames)
 
@@ -105,7 +105,7 @@ class CloudRunner(object):
     DEFAULT_TIMEOUT = 60
 
     default_transport = 'cloudrunner.plugins.transport.' \
-        'zmq_transport.ZmqCliTransport'
+        'rest_transport.RESTTransport'
     plugins = {}
 
     def __init__(self, transport, plugins=None,
@@ -161,7 +161,7 @@ class CloudRunner(object):
         req.append(session_id=session_id)
         req.append(job_id=job_id)
 
-        self.queue.send(*req.pack())
+        self.queue.send(*req.pack(), **req.kwargs)
 
         if not to_read:
             return
@@ -174,7 +174,7 @@ class CloudRunner(object):
         status, r = resp
 
         if len(r) != 2:
-            raise Exception('Error: {}'.format(r[0]))
+            raise Exception('Error: %s' % r[0])
         return r[1]
 
     def terminate(self, session_id, sig="term", to_read=True):
@@ -184,7 +184,7 @@ class CloudRunner(object):
         req.append(session_id=session_id)
         req.append(action=sig)
 
-        self.queue.send(*req.pack())
+        self.queue.send(*req.pack(), **req.kwargs)
 
         if not to_read:
             return
@@ -239,7 +239,7 @@ class CloudRunner(object):
 
         req.append(timeout=self.request_timeout)
 
-        self.queue.send(*req.pack())
+        self.queue.send(*req.pack(), **req.kwargs)
         return AsyncResp(self, self.queue)
 
     def attach(self, session_id, targets):
@@ -252,7 +252,7 @@ class CloudRunner(object):
         # we do not know the original timeout,
         self.timeout = sys.maxint / 1000
 
-        self.queue.send(*req.pack())
+        self.queue.send(*req.pack(), **req.kwargs)
         r = self.queue.recv(timeout=5)
         status, resp = r
 
@@ -265,7 +265,7 @@ class CloudRunner(object):
         req = self.build_request()
         req.append(control=command)
 
-        self.queue.send(*req.pack())
+        self.queue.send(*req.pack(), **req.kwargs)
         status, resp = self.queue.recv(timeout=5)
         if status == "ERR":
             raise Exception("Error getting nodes on Master: {}".format(resp))
@@ -314,7 +314,7 @@ class CloudRunner(object):
         req.append(control='plugin', data=data)
         req.append(args='"' + '" "'.join(args) + '"')
 
-        self.queue.send(*req.pack())
+        self.queue.send(*req.pack(), **req.kwargs)
         resp = self.queue.recv()
         if len(resp) > 1:
             return json.loads(resp[1])
@@ -325,7 +325,7 @@ class CloudRunner(object):
         req = self.build_request()
         req.append(control='plugins')
 
-        self.queue.send(*req.pack())
+        self.queue.send(*req.pack(), **req.kwargs)
         success, result = self.queue.recv()
         if success and len(result) > 0:
             return json.loads(result)

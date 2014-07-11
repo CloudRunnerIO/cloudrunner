@@ -151,6 +151,9 @@ class Processor(object):
                                         self.session_cwd,
                                         initial_env)
             yield popen
+        except OSError, oserr:
+            LOG.exception(oserr)
+            stderr += '%r' % oserr
         except Exception, ex:
             LOG.exception(ex)
             stderr += '%r' % ex

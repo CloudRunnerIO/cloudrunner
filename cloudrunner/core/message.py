@@ -107,7 +107,7 @@ class AgentReq(BaseMessage):
     def pack(self):
         return [
             self.login, str(self.auth_type), self.password, self.control,
-            self.data or '', json.dumps(self.kwargs)]
+            self.data or '']
 
 
 class ScheduleReq(BaseMessage):
@@ -301,6 +301,7 @@ class TransportMessage(object):
 
     pack_order = []
     unpack_functions = {}
+    _seq_no = 0
 
     def default_packer(self, val):
         return stringify1(val)
@@ -311,14 +312,15 @@ class TransportMessage(object):
         #   task_name, user, targets, tags, job_id, run_as,
         #   node_id, stdout, stderr
 
-        data = [self.status, str(int(time.time()))]
-        for field_name in self.pack_order:
-            val = getattr(self, field_name)
-            packed_val = getattr(self, "pack_%s" % field_name,
-                                 self.default_packer)(val)
-            data.append(packed_val)
-
         return dict([(k, getattr(self, k)) for k in self.pack_order])
+
+    @property
+    def seq_no(self):
+        return self._seq_no
+
+    @seq_no.setter
+    def seq_no(self, seq_no):
+        self._seq_no = seq_no
 
     @classmethod
     def unpack(cls, status, timestamp, *args):
@@ -345,8 +347,8 @@ class TransportMessage(object):
 
 class PipeMessage(TransportMessage):
     status = StatusCodes.PIPEOUT
-    pack_order = ["type", "session_id", "step_id", "user", "org", "job_id",
-                  "run_as", "node", "stdout", "stderr"]
+    pack_order = ["type", "session_id", "seq_no", "step_id", "user", "org",
+                  "job_id", "run_as", "node", "stdout", "stderr"]
 
     def __init__(self, session_id, step_id, user, org, job_id,
                  run_as, node, stdout=None, stderr=None):
@@ -364,7 +366,7 @@ class PipeMessage(TransportMessage):
 
 class FinishedMessage(TransportMessage):
     status = StatusCodes.FINISHED
-    pack_order = ["type", "session_id", "user", "org", "response"]
+    pack_order = ["type", "session_id", "seq_no", "user", "org", "response"]
 
     unpack_functions = {
         "response": json.loads,

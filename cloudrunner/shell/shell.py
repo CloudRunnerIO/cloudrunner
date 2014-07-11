@@ -18,12 +18,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-
-try:
-    import argcomplete
-except ImportError:
-    pass
-import argparse
 import cmd
 import glob
 import json
@@ -67,48 +61,6 @@ console = Console()
 
 class Exit(Exception):
     pass
-
-
-class ShellRunner(object):
-
-    """
-        Base class to split and send scripts to CloudRunner Dispatcher
-    """
-
-    def __init__(self, *args, **kwargs):
-        self._parser = _parser()
-
-        try:
-            argcomplete.autocomplete(self._parser)
-        except:
-            pass
-
-        if args:
-            self.args = self._parser.parse_args(args)
-        else:
-            self.args = self._parser.parse_args()
-
-        if self.args.config:
-            global CONFIG
-            CONFIG = Config(self.args.config)
-
-        if 'verbose' in self.args and self.args.verbose:
-            configure_loggers(logging.DEBUG,
-                              CONFIG.log_file or
-                              LIB_DIR + 'cloudrunner-node.log')
-            self.kwargs = kwargs
-
-    def choose(self):
-        shell = Shell(args=self.args)
-
-        if not hasattr(shell, self.args.controller):
-            if self.args.controller in PLUGINS:
-                plugin_cmd = PLUGINS[self.args.controller]
-                getattr(shell, plugin_cmd)()
-            else:
-                console.red("Unrecognized command: %s", self.args.controller)
-        else:
-            getattr(shell, self.args.controller)()
 
 
 LANGS = {
@@ -180,7 +132,7 @@ class Shell(cmd.Cmd):
                 self._nodes = self.api.list_active_nodes()
             return self._nodes
         else:
-            return [x[0] for x in self.api.transport.peer_store._store]
+            return [x[0] for x in self.api.transport.peer_store]
 
     @property
     def api(self):
@@ -702,268 +654,6 @@ class Shell(cmd.Cmd):
         self.api.close()
 
 
-def _parser():
-    _parser = argparse.ArgumentParser(description="CloudRunner shell")
-
-    _common = argparse.ArgumentParser(add_help=False)
-
-    rawtxtparser = argparse.RawTextHelpFormatter
-
-    server = _common.add_argument(
-        '-s', '--server', dest='server', required=False,
-        default=os.environ.get('CLOUDRUNNER_SERVER', None),
-        help='URL to the server to connect.'
-        'Can be set also in \n'
-        '/etc/cloudrunner/cloudrunner-shell.conf as:\n\n'
-        '[General]\n'
-        'dispatcher_uri=tcp://server:port\n\n'
-        'or as env variable CLOUDRUNNER_SERVER')
-
-    user_arg = _common.add_argument(
-        '-u', '--user',
-        default=os.environ.get(
-            'CLOUDRUNNER_USER', None),
-        help='User name to authenticate at '
-        'Master.\nCould be set as env variable '
-        'CLOUDRUNNER_USER instead.')
-
-    token_arg = _common.add_argument(
-        '-p', '--pass', dest='token',
-        default=os.environ.get(
-            'CLOUDRUNNER_TOKEN', None),
-        help='Password/Token authenticate at '
-        'Master.\nCould be set as env variable '
-        'CLOUDRUNNER_TOKEN instead.')
-
-    _common.add_argument('-t', '--timeout', default=60,
-                         help='Timeout to expect result from '
-                         'Master in seconds.\nDefault is'
-                         ' %(default)s seconds.\n'
-                         'Set -1 for a persistent job')
-
-    _common.add_argument('-c', '--config',
-                         default=None,
-                         help='Path to a config file.\n'
-                         'Defaults to %s seconds.' %
-                         CONFIG_SHELL_LOC)
-
-    _common.add_argument('-v', '--verbose', action='store_true',
-                         help="Show verbose info")
-    _common.add_argument('-#', '--tag', action="append", dest="tags",
-                         help='Label runs with tags. '
-                         'Allows multiple values')
-
-    controllers = _parser.add_subparsers(dest='controller',
-                                         help='Shell commands')
-
-    # Run
-    run = controllers.add_parser('run', parents=[_common],
-                                 help='Run a cloudrunner script on nodes',
-                                 formatter_class=rawtxtparser)
-
-    run.add_argument('script', help='Script to run', nargs='?',
-                     default=None)
-
-    run.add_argument('-i', '--inline', action='store_true',
-                     help='Pass inline script instead of a file')
-
-    run.add_argument('-n', '--name', dest='name', help='Set an Id for the run')
-
-    run.add_argument('--test', action='store_true',
-                     dest='test', help='Perform a Test Run ('
-                     'nothing is sent to nodes, just \'played\' on server')
-
-    run.add_argument('-e', '--env', dest='env', required=False,
-                           help='Initial Environment as JSON string')
-
-    run.add_argument('--pipe-out', action='store_true',
-                     default=True,
-                     help='Show stdout from process pipe')
-
-    run.add_argument('-L', '--include', action='append',
-                     help='Pass scripts to be included into run\n'
-                     'Could be applied multiple times,\n'
-                     'or separated with semi-colon(:)')
-
-    run.add_argument('-a', '--auth_remotely', action='store_true',
-                     default=False,
-                     help='Send authentication headers '
-                     'when requesting script over http|https')
-
-    if CONFIG.mode == 'server':
-        attach = controllers.add_parser('attach', parents=[_common],
-                                        help="Attach to an existing session")
-
-        attach.add_argument('session_id', help="Session ID")
-
-        attach.add_argument('targets', help='Targets to monitor', nargs='+',
-                            default=None)
-
-        notify = controllers.add_parser('notify', parents=[_common],
-                                        help="Notify running job session")
-
-        notify.add_argument('session_id', help="Session ID")
-
-        notify.add_argument('job_id', help="Job ID")
-
-        notify.add_argument('--targets', help='Targets to monitor', nargs='+',
-                            default=None)
-
-        notify.add_argument('input', help='Data to send', nargs='?',
-                            default=None)
-
-        notify.add_argument('-i', '--inline', action='store_true',
-                            help='Pass inline data instead of a file')
-
-        terminate = controllers.add_parser(
-            'terminate', parents=[_common],
-            help="Terminate running job session")
-
-        terminate.add_argument('session_id', help="Session ID")
-
-        terminate.add_argument('--kill', action='store_true',
-                               help="Send SIGKILL instead of SIGTERM")
-
-        # Plugins
-        controllers.add_parser('plugins', parents=[_common],
-                               help='Shows available plugins on Master')
-
-        # Plugins
-        def dynamic_loader(prefix, parsedargs, **kwargs):
-            if os.environ.get('COMP_LINE'):
-                positionals = os.environ.get('COMP_LINE').split()[1:]
-            else:
-                positionals = sys.argv[1:]
-
-            if positionals and getattr(Shell, positionals[0], None):
-                # known function
-                return
-
-            global __AVAIL_PLUGINS__
-            try:
-                assert __AVAIL_PLUGINS__
-            except NameError:
-                success, plugins = Shell(action="plugins",
-                                         user=user_arg.default,
-                                         server=server.default,
-                                         token=token_arg.default,
-                                         ).plugins_get()
-                __AVAIL_PLUGINS__ = [str(p[0]) for p in plugins]
-            opts = []
-            if not positionals or positionals[0] not in __AVAIL_PLUGINS__:
-                opts = [p for p in __AVAIL_PLUGINS__]
-                for opt in opts:
-                    p_parser = controllers.add_parser(
-                        opt, parents=[_common], help='Run a plugin on Master')
-
-            else:
-                plugin = positionals[0]
-                p_parser = controllers.add_parser(
-                    plugin, parents=[_common], help='Plugin %s' % plugin)
-                if positionals[1:]:
-                    p_parser.add_argument(
-                        'xargs', nargs='+').completer = dynamic_completer
-                positionals.append('--jhelp')
-                PLUGINS[plugin] = 'plugin'
-                success, opts = Shell(action="plugin",
-                                      controller=plugin,
-                                      user=user_arg.default,
-                                      script="",
-                                      inline=False,
-                                      server=server.default,
-                                      token=token_arg.default,
-                                      timeout=2,
-                                      xargs=positionals[1:]).plugin_get()[0]
-                for opt in opts:
-                    if isinstance(opt, dict):
-                        for k, v in opt.items():
-                            _actions = p_parser.add_subparsers(dest=k)
-                            for action in v:
-                                _actions.add_parser(action)
-                    elif opt.startswith("@"):
-                        # store_true
-                        opt = opt.replace('@', '--')
-                        p_parser.add_argument(
-                            opt, action='store_true').completer = \
-                            dynamic_completer
-                    else:
-                        p_parser.add_argument(
-                            opt).completer = dynamic_completer
-
-        def dynamic_completer(prefix, parsed_args, **kwargs):
-            global __AVAIL_PLUGINS__
-            try:
-                assert __AVAIL_PLUGINS__
-            except NameError:
-                success, plugins = Shell(action="plugins",
-                                         user=user_arg.default,
-                                         server=server.default,
-                                         token=token_arg.default,
-                                         ).plugins_get()
-                __AVAIL_PLUGINS__ = [str(p[0]) for p in plugins]
-
-            param = os.environ.get('COMP_LINE', prefix)
-            positionals = param.split()[1:]
-
-            if not positionals:
-                return (p for p in __AVAIL_PLUGINS__)
-            if positionals[0] not in __AVAIL_PLUGINS__:
-                return (p for p in __AVAIL_PLUGINS__)
-
-            positionals.append('--jhelp')
-
-            try:
-                success, opts = Shell(action="plugin",
-                                      controller=positionals[0],
-                                      user=user_arg.default,
-                                      script="",
-                                      inline=False,
-                                      server=server.default,
-                                      token=token_arg.default,
-                                      timeout=2,
-                                      xargs=positionals[1:]).plugin_get()[0]
-            except Exception, ex:
-                return (str(ex),)
-
-            args = []
-            try:
-                for opt in opts:
-                    if isinstance(opt, dict):
-                        args.extend(opts.values())
-                    elif opt.startswith('@'):
-                        args.append(opt.replace('@', '--'))
-                    else:
-                        args.append(opt)
-            except Exception, ex:
-                return (str(ex),)
-
-            return (x for x in args)
-
-        dynamic_loader(None, None)
-
-        # Nodes
-        controllers.add_parser('list_nodes', parents=[_common],
-                               help='List nodes on master')
-
-        controllers.add_parser('list_active_nodes',
-                               parents=[_common],
-                               help='List nodes on master')
-
-        controllers.add_parser('list_pending_nodes',
-                               parents=[_common],
-                               help='List pending nodes on master')
-
-    mode = controllers.add_parser('mode', help="Set CLI mode")
-
-    mode.add_argument('mode', choices=['single-user', 'server'],
-                      help="Set mode to single-user or server-controlled")
-
-    mode.add_argument('-c', '--config', default=None,
-                      help='Path to a config file.\n Defaults to %s seconds.' %
-                      CONFIG_SHELL_LOC)
-    return _parser
-
-
 def main():
     sh = Shell()
     run = True
@@ -973,7 +663,7 @@ def main():
         except KeyboardInterrupt:
             print
         except Exception, ex:
-            console.red("Error: %s" % ex)
+            console.red("Error: %r" % ex)
 
     sh.terminate()
 

@@ -68,6 +68,9 @@ class CertStore(object):
             if _c == cn and _f == fp:
                 return True
 
+    def __iter__(self):
+        return iter(self._store)
+
     def insert(self, common_name, fingerprint):
         access_key = "%s%s%s" % (common_name, self.SEP, fingerprint)
 

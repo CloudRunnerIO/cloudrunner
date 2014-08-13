@@ -19,7 +19,6 @@
 import abc
 
 import json
-import time
 
 from cloudrunner.util.string import stringify1
 
@@ -104,10 +103,15 @@ class AgentReq(BaseMessage):
             else:
                 self.kwargs[k] = self._str(v)
 
-    def pack(self):
-        return [
-            self.login, str(self.auth_type), self.password, self.control,
-            self.data or '']
+    def pack(self, extra=False):
+        if extra:
+            return [self.login, str(self.auth_type),
+                    self.password, self.control,
+                    self.data or '', json.dumps(self.kwargs)]
+        else:
+            return [self.login, str(self.auth_type),
+                    self.password, self.control,
+                    self.data or '']
 
 
 class ScheduleReq(BaseMessage):
@@ -312,7 +316,7 @@ class TransportMessage(object):
         #   task_name, user, targets, tags, job_id, run_as,
         #   node_id, stdout, stderr
 
-        return dict([(k, getattr(self, k)) for k in self.pack_order])
+        return dict([(k, getattr(self, k, None)) for k in self.pack_order])
 
     @property
     def seq_no(self):
@@ -335,49 +339,47 @@ class TransportMessage(object):
         if target_klass is None:
             return None
 
-        msg_kwargs = {}
+        inst = target_klass()
         for idx, field_name in enumerate(target_klass.pack_order):
             val = args[idx]
             unpack_function = target_klass.unpack_functions.get(field_name,
                                                                 lambda x: x)
-            msg_kwargs[field_name] = unpack_function(val)
+            setattr(inst, field_name, unpack_function(val))
 
-        return target_klass(**msg_kwargs)
+        return inst
+
+
+class InitialMessage(TransportMessage):
+    status = StatusCodes.STARTED
+    pack_order = ["type", "session_id",
+                  "ts", "org", "seq_no", "step_id"]
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            if k in self.pack_order:
+                setattr(self, k, v)
+        self.type = "INITIAL"
 
 
 class PipeMessage(TransportMessage):
     status = StatusCodes.PIPEOUT
-    pack_order = ["type", "session_id", "seq_no", "step_id", "user", "org",
-                  "job_id", "run_as", "node", "stdout", "stderr"]
+    pack_order = ["type", "session_id", "ts", "seq_no", "org", "step_id",
+                  "user", "job_id", "run_as", "node", "stdout", "stderr"]
 
-    def __init__(self, session_id, step_id, user, org, job_id,
-                 run_as, node, stdout=None, stderr=None):
-        self.session_id = session_id
-        self.step_id = step_id
-        self.user = user
-        self.org = org
-        self.job_id = job_id
-        self.run_as = run_as
-        self.node = node
-        self.stdout = stdout
-        self.stderr = stderr
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            if k in self.pack_order:
+                setattr(self, k, v)
         self.type = "PARTIAL"
 
 
 class FinishedMessage(TransportMessage):
     status = StatusCodes.FINISHED
-    pack_order = ["type", "session_id", "seq_no", "user", "org", "response"]
+    pack_order = ["type", "session_id", "ts", "seq_no",
+                  "user", "org", "step_id", "result"]
 
-    unpack_functions = {
-        "response": json.loads,
-    }
-
-    def __init__(self, session_id, user, org, response):
-        self.session_id = session_id
-        self.user = user
-        self.org = org
-        self.response = response
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            if k in self.pack_order:
+                setattr(self, k, v)
         self.type = "FINISHED"
-
-    def pack_response(self, resp):
-        return json.dumps(resp)

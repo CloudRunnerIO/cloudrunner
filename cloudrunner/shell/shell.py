@@ -45,7 +45,7 @@ except ImportError:
 
 CONFIG = Config(CONFIG_SHELL_LOC)
 PLUGINS = {}
-LIBRARY_ITEM = re.compile(r'\[\w*\]\://')
+LIBRARY_ITEM = re.compile(r'\[(?P<store>\w*)\]\://')
 HTTP_ITEM = re.compile(r'https*\://.*')
 
 LOG_FORMAT = '>>%(levelname)s:%(message)s'
@@ -236,8 +236,9 @@ class Shell(cmd.Cmd):
         if not os.path.exists(arg):
             if HTTP_ITEM.match(arg):
                 self.included_files.append((arg, arg))
-            elif arg in self.api.library.keys():
-                self.included_files.append((self.api.library[arg], arg))
+            elif arg in self.api.library['inlines'].keys():
+                self.included_files.append((self.api.library['inlines'][arg],
+                                            arg))
             else:
                 console.red("File '%s' doesn't exist" % arg)
         else:
@@ -270,15 +271,20 @@ class Shell(cmd.Cmd):
             console.green(os.path.relpath(path, common), bold=1)
             return os.path.relpath(path, common)
 
-    def _browse(self, pattern):
+    def _browse_local(self, pattern):
+        res = []
         pwd = os.path.join(os.path.abspath(os.path.curdir))
         search_dir = os.path.dirname(os.path.join(pwd, pattern))
         selector = pattern.rpartition('/')[2]
         glob_pattern = os.path.join(search_dir, selector) + '*'
         res = [os.path.relpath(p, search_dir)
                for p in list(glob.glob(glob_pattern))]
-        if self.api.library:
-            res.extend([k for k, v in self.api.library.items()
+        return res
+
+    def _browse_remote(self, pattern, target=None):
+        res = []
+        if self.api.library[target]:
+            res.extend([k for k, v in self.api.library[target].items()
                         if v.startswith(pattern)])
         return res
 
@@ -288,7 +294,8 @@ class Shell(cmd.Cmd):
 
     def complete_include_file(self, opt, full, arg_start, arg_end):
         cptext = full[len("include_file") + 1:]
-        return self._browse(cptext)
+        return self._browse_local(cptext) + self._browse_remote(cptext,
+                                                                'inlines')
 
     def do_detach_file(self, arg):
         """Files to detach when executing command"""
@@ -316,6 +323,42 @@ class Shell(cmd.Cmd):
             if name.startswith(cptext):
                 res.append(name)
         return res
+
+    def do_show_workflow(self, arg):
+        if arg not in self.api.workflows:
+            console.red("Workflow not found")
+
+        else:
+            store = LIBRARY_ITEM.match(arg).group(1)
+            wf_name = LIBRARY_ITEM.sub('', arg)
+            ares = self.api.show_workflow(store, wf_name)
+            console.yellow(ares)
+
+    def complete_show_workflow(self, opt, full, arg_start, arg_end):
+        cptext = full[len("show_workflow") + 1:]
+        return self._browse_remote(cptext, target="workflows")
+
+    def do_load(self, arg):
+        store = LIBRARY_ITEM.match(arg).group(1)
+        wf_name = LIBRARY_ITEM.sub('', arg)
+        ares = self.api.show_workflow(store, wf_name)
+        self.buffer = ares.splitlines()
+
+    def complete_load(self, opt, full, arg_start, arg_end):
+        cptext = full[len("load") + 1:]
+        return self._browse_remote(cptext, target="workflows")
+
+    def do_show_inline(self, arg):
+        if arg not in self.api.library['inlines']:
+            console.red("Inline not found")
+        else:
+            inl_name = LIBRARY_ITEM.sub('', arg)
+            ares = self.api.show_inline(inl_name)
+            console.yellow(ares)
+
+    def complete_show_inline(self, opt, full, arg_start, arg_end):
+        cptext = full[len("show_inline") + 1:]
+        return self._browse_remote(cptext, target="inlines")
 
     def help_clear(self):
         console.yellow("Clears current buffer")

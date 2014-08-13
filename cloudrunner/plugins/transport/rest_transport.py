@@ -1,17 +1,29 @@
 import json
 import logging
 import requests
+import time
 
-from cloudrunner.plugins.transport.base import (TransportBackend,
-                                                Endpoint,
-                                                Poller)
+from cloudrunner.plugins.transport.base import (TransportBackend)
 from cloudrunner.core.message import StatusCodes
 
-
 LOG = logging.getLogger()
+R_LOG = logging.getLogger("requests")
+R_LOG.setLevel(logging.ERROR)
 
 
-class Dispatch(object):
+class OutputterMixin(object):
+
+    def pipe(self, seq, uuid, step, run_as, node, stdout, stderr):
+        return (StatusCodes.PIPEOUT, '', StatusCodes.PIPEOUT,
+                uuid, seq, step, '', '', uuid,
+                run_as, node, stdout, stderr)
+
+    def finished(self, seq, uuid, response):
+        return (StatusCodes.FINISHED, '', StatusCodes.FINISHED,
+                uuid, seq, '', '', response)
+
+
+class Dispatch(OutputterMixin):
 
     def __init__(self, initial, **kwargs):
         self.method = "post"
@@ -24,32 +36,206 @@ class Dispatch(object):
 
     def __next__(self):
         send_func = (yield None)
-
+        yield "Starting"
+        inc = 1
         r = send_func(self.method, self.path,
-                      data=json.dumps(self.initial))
+                      data=json.dumps(self.initial)).json()
         try:
-            _uuid = r.json()['dispatch']['uuid']
-            assert _uuid
+            _uuid = r.get('dispatch', {}).get('uuid')
 
-            r = send_func('get', "logs:output", args=[_uuid])
-            print r.json()
-            log_info = r.json()['output']
-            yield (StatusCodes.PIPEOUT,
-                   log_info['created_at'],
-                   "PARTIAL",
-                   log_info['uuid'],
-                   )
+            if not _uuid:
+                yield "Error"
+                return
 
-        except Exception, ex:
-            LOG.exception(ex)
+            running = True
+            etag = None
+            while running:
+                r = send_func('get', "logs:output", args=[_uuid],
+                              headers={'Etag': etag})
+                if not r.status_code == 200:
+                    yield self.pipe(0, '', 1, '', '', '',
+                                    "Invalid response from server: %s" %
+                                    r.status_code)
+                r = r.json()
+                log_info = r['output']
+                status = log_info.get('status')
+                etag = log_info.get('etag', 0)
+                for out in log_info.get('steps', []):
+                    if "stdout" in out or "stderr" in out:
+                        yield self.pipe(inc, _uuid, out['step'],
+                                        out['run_as'],
+                                        out['node'],
+                                        '\n'.join(out.get('stdout', [])),
+                                        '\n'.join(out.get('stderr', [])),
+                                        )
+                    inc += 1
+                if status == "finished":
+                    r = send_func('get', "logs:get", args=[_uuid],
+                                  headers={'Etag': etag}).json()
+                    log_info = r['log']
+                    yield self.finished(0, _uuid, log_info)
+                    break
+                time.sleep(1)
+
+        except Exception:
+            # LOG.exception(ex)
             raise StopIteration("Cannot start remote execution on server")
         finally:
             raise StopIteration()
 
     next = __next__
 
+
+class ListNodes(object):
+
+    def __init__(self, initial, **kwargs):
+        self.method = "get"
+        self.initial = {}
+
+    def __iter__(self):
+        return self.__next__()
+
+    def __next__(self):
+        send_func = (yield None)
+        yield "Starting"
+        r = send_func(self.method, self.path)
+        try:
+            yield r.json()['nodes']
+        except Exception:
+            # LOG.exception(ex)
+            raise StopIteration("Cannot start remote execution on server")
+        finally:
+            raise StopIteration()
+
+    next = __next__
+
+
+class ListActive(ListNodes):
+    path = "dispatch:active_nodes"
+
+
+class ListNodes(ListNodes):
+    path = "dispatch:nodes"
+
+
+class ListPending(ListNodes):
+    path = "dispatch:pending_nodes"
+
+
+class LibWorkflows(object):
+    method = "get"
+    path = "library:workflows"
+
+    def __init__(self, initial, **kwargs):
+        self.initial = {}
+
+    def __iter__(self):
+        return self.__next__()
+
+    def __next__(self):
+        send_func = (yield None)
+        yield "Starting"
+        r = send_func(self.method, self.path)
+        try:
+            yield r.json()["workflows"]
+        except Exception:
+            # LOG.exception(ex)
+            raise StopIteration("Cannot start remote execution on server")
+        finally:
+            raise StopIteration()
+
+    next = __next__
+
+
+class LibInlines(object):
+    method = "get"
+    path = "library:inlines"
+
+    def __init__(self, initial, **kwargs):
+        self.initial = {}
+
+    def __iter__(self):
+        return self.__next__()
+
+    def __next__(self):
+        send_func = (yield None)
+        yield "Starting"
+        r = send_func(self.method, self.path)
+        try:
+            yield r.json()["inlines"]
+        except Exception:
+            # LOG.exception(ex)
+            raise StopIteration("Cannot start remote execution on server")
+        finally:
+            raise StopIteration()
+
+    next = __next__
+
+
+class GetWorkflow(object):
+    method = "get"
+    path = "library:workflows"
+
+    def __init__(self, initial, wf_id=None, store=None, **kwargs):
+        self.initial = {}
+        self.wf_id = wf_id.lstrip('/')
+        self.store = store
+
+    def __iter__(self):
+        return self.__next__()
+
+    def __next__(self):
+        send_func = (yield None)
+        yield "Starting"
+        r = send_func(self.method, self.path,
+                      args=[self.wf_id],
+                      q=dict(store=self.store))
+        try:
+            yield r.json()["workflow"]['content']
+        except Exception:
+            # LOG.exception(ex)
+            raise StopIteration("Cannot start remote execution on server")
+        finally:
+            raise StopIteration()
+
+    next = __next__
+
+
+class GetInline(object):
+    method = "get"
+    path = "library:inlines"
+
+    def __init__(self, initial, inl_id=None, store=None, **kwargs):
+        self.initial = {}
+        self.inl_id = inl_id.lstrip('/')
+
+    def __iter__(self):
+        return self.__next__()
+
+    def __next__(self):
+        send_func = (yield None)
+        yield "Starting"
+        r = send_func(self.method, self.path, args=[self.inl_id])
+        try:
+            yield r.json()["inline"]['content']
+        except Exception:
+            # LOG.exception(ex)
+            raise StopIteration("Cannot start remote execution on server")
+        finally:
+            raise StopIteration()
+
+    next = __next__
+
+
 COMMAND_MAP = {
     "dispatch": Dispatch,
+    "list_active_nodes": ListActive,
+    "list_nodes": ListNodes,
+    "list_pending_nodes": ListPending,
+    "workflows": LibWorkflows,
+    "inlines": LibInlines,
+    "workflow": GetWorkflow,
+    "inline": GetInline,
 }
 
 
@@ -63,36 +249,61 @@ class OpQueue(object):
         self.session = session
 
     def url(self, target, *args, **kwargs):
-        return "/".join([self.base_api_url] +
-                        list(target.split(':')) +
-                        list(args))
+        path = "/".join([self.base_api_url] +
+                        list(target.split(':') + list(args)))
+        q_search = ""
+        if kwargs:
+            q_search = "&".join(["=".join([k, v])
+                                 for k, v in kwargs.items()])
+
+        return "%s?%s" % (path, q_search)
+
+    def partial_send(self, method, url,
+                     args=None, data=None, q=None, headers=None):
+        _headers = dict(headers or {})
+        _headers["Content-Type"] = "application/json"
+        r = self.session.request(method,
+                                 self.url(url, *(args or []), **(q or {})),
+                                 data=data, headers=_headers)
+        if r.status_code == 401:
+            self.refresh_token()
+            # Access denied
+            r = self.session.request(method, self.url(url, *(args or []),
+                                                      **(q or {})),
+                                     data=data, headers=_headers)
+        return r
+
+    def refresh_token(self):
+        try:
+            # request token
+            r = self.session.get(self.url("auth:login",
+                                          self.user, self.pass_token))
+            self.token = r.json()['login']['token']
+            self.session.headers.update({'Cr-User': self.user,
+                                         'Cr-Token': self.token})
+        except Exception, ex:
+            LOG.exception(ex)
+            raise Exception("Cannot retrieve auth token. "
+                            "Check configuration")
 
     def send(self, user, auth_type, pass_token, command, payload=None,
              **kwargs):
 
+        self.user = user
+        self.pass_token = pass_token
         if not self.token:
-            try:
-                # request token
-                r = self.session.get(self.url("auth:login", user, pass_token))
-                self.token = r.json()['login']['token']
-                self.session.headers.update({'Cr-User': user,
-                                             'Cr-Token': self.token})
-            except Exception, ex:
-                LOG.exception(ex)
-                raise Exception("Cannot retrieve auth token. "
-                                "Check configuration")
+            self.refresh_token()
 
         cmd_class = COMMAND_MAP.get(command)
         if not cmd_class:
+            LOG.warn("Command %s not found" % command)
             raise Exception("Invalid command: %s" % command)
 
         cmd = cmd_class(payload, **kwargs)
 
         self.iter = iter(cmd)
         self.iter.next()
-        val = self.iter.send(lambda meth, path, args=[], data=None:
-                             self.session.request(meth, self.url(path, *args),
-                                                  data=data))
+        self.iter.send(self.partial_send)
 
     def recv(self, timeout=2):
         ret_value = self.iter.next()
@@ -101,11 +312,12 @@ class OpQueue(object):
 
 class RESTTransport(TransportBackend):
 
+    mode = 'server'
     config_options = ["node_id", "api_url",
                       "security.peer_cache", "mode"]
 
     def __init__(self, **kwargs):
-        api_url = kwargs.get('api_url') or 'http://127.0.0.1:5558/rest/'
+        api_url = kwargs.get('api_url') or 'http://127.0.0.1/rest/'
         self.session = requests.Session()
         self.op_queue = OpQueue(self.session, api_url)
 

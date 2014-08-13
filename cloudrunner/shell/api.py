@@ -47,9 +47,12 @@ class AsyncResp(object):
             if msg:
                 yield msg
 
+    def __iter__(self):
+        return self.iter()
+
     def get_message(self, timeout=None):
         frames = self.queue.recv(timeout)
-        LOG.info("Received frames: %r", frames)
+        LOG.debug("Received frames: %r", frames)
         if frames:
             return message.TransportMessage.unpack(*frames)
 
@@ -266,14 +269,8 @@ class CloudRunner(object):
         req.append(control=command)
 
         self.queue.send(*req.pack(), **req.kwargs)
-        status, resp = self.queue.recv(timeout=5)
-        if status == "ERR":
-            raise Exception("Error getting nodes on Master: {}".format(resp))
-
-        result = json.loads(resp)
-        if not result[0]:
-            raise Exception("Error getting nodes on Master: {}".format(result))
-        return result[1]
+        resp = self.queue.recv(timeout=5)
+        return resp
 
     def list_active_nodes(self):
         return self._list_nodes_get('list_active_nodes')
@@ -284,50 +281,71 @@ class CloudRunner(object):
     def list_pending_nodes(self):
         return self._list_nodes_get('list_pending_nodes')
 
+    def _get_workflows(self):
+        req = self.build_request()
+        req.append(control="workflows")
+
+        self.queue.send(*req.pack())
+        wfs = self.queue.recv(timeout=5)
+        return wfs
+
+    def _get_inlines(self):
+        req = self.build_request()
+        req.append(control="inlines")
+
+        self.queue.send(*req.pack())
+        inls = self.queue.recv(timeout=5)
+        return inls
+
+    def show_workflow(self, store, wf_id):
+        req = self.build_request()
+        req.append(control="workflow")
+        req.append(store=store)
+        req.append(wf_id=wf_id)
+
+        self.queue.send(*req.pack(), **req.kwargs)
+        wf = self.queue.recv(timeout=5)
+        return wf
+
+    def show_inline(self, inl_id):
+        req = self.build_request()
+        req.append(control="inline")
+        req.append(inl_id=inl_id)
+
+        self.queue.send(*req.pack(), **req.kwargs)
+        inl = self.queue.recv(timeout=5)
+        return inl
+
     @property
     def library(self):
         if hasattr(self, "_library"):
             return self._library
-        _library = {}
+        _library = {"workflows": {}, "inlines": {}}
 
         if self.transport.mode != "server":
             return _library
 
         try:
-            success, result = self.get_plugin("library",
-                                              args=["list", "--json"])[0]
-            if success:
+            try:
+                result = self._get_workflows()
                 for store_name, items in result.items():
                     for item in items:
                         item_name = "[%s]://%s" % (store_name, item['name'])
                         item_path = item['name']
-                        _library[item_name] = item_path
-                self._library = _library
+                        _library['workflows'][item_name] = item_path
+            except Exception, ex:
+                print ex
+            try:
+                result = self._get_inlines()
+                for item in result:
+                    item_name = "[%s]://%s" % ("library", item['name'])
+                    item_path = item['name']
+                    _library['inlines'][item_name] = item_path
+            except Exception, ex:
+                print ex
+
+            self._library = _library
         except:
             pass
 
         return _library
-
-    def get_plugin(self, controller, data=None, args=None):
-        req = self.build_request()
-        req.append(plugin=controller)
-        req.append(control='plugin', data=data)
-        req.append(args='"' + '" "'.join(args) + '"')
-
-        self.queue.send(*req.pack(), **req.kwargs)
-        resp = self.queue.recv()
-        if len(resp) > 1:
-            return json.loads(resp[1])
-        else:
-            return {}
-
-    def list_plugins(self):
-        req = self.build_request()
-        req.append(control='plugins')
-
-        self.queue.send(*req.pack(), **req.kwargs)
-        success, result = self.queue.recv()
-        if success and len(result) > 0:
-            return json.loads(result)
-        else:
-            return []

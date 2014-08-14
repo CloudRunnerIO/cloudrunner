@@ -362,7 +362,7 @@ class TLSZmqClientSocket(object):
         retry_count = 5
         while not self.stopped.is_set() and retry_count:
             try:
-                socks = dict(self.poller.poll(1))
+                socks = dict(self.poller.poll(1000))
 
                 if self.socket_proc in socks:
                     data = self.recv_from_worker()

@@ -18,7 +18,7 @@
 #    under the License.
 
 import logging
-import json
+import msgpack
 import os
 import sys
 from cloudrunner.core import message, parser
@@ -39,22 +39,31 @@ class AsyncResp(object):
 
     def iter(self, timeout=5):
         while not self.ready:
-            msg = self.get_message(timeout=timeout)
-            if msg:
-                LOG.debug("Received message: %s", msg.status)
-            if msg and msg.status == message.StatusCodes.FINISHED:
-                self.ready = True
-            if msg:
-                yield msg
+            try:
+                frames = self.queue.recv(timeout)
+                if frames:
+                    msg = None
+                    try:
+                        msg = message.TransportMessage.unpack(*frames)
+                        LOG.debug("Received message: %s", vars(msg))
+                    except:
+                        LOG.error("Received frames: %r", frames)
+                    if msg:
+                        yield msg
+                    else:
+                        LOG.error("Received frames: %r", frames)
+                    if msg and msg.status == message.StatusCodes.FINISHED:
+                        break
+                else:
+                    yield "Empty/wrong response from server"
+                    return
+            except Exception, ex:
+                LOG.exception(ex)
+                yield str(ex)
+                return
 
     def __iter__(self):
         return self.iter()
-
-    def get_message(self, timeout=None):
-        frames = self.queue.recv(timeout)
-        LOG.debug("Received frames: %r", frames)
-        if frames:
-            return message.TransportMessage.unpack(*frames)
 
 
 class AsyncRespLocal(object):
@@ -198,7 +207,7 @@ class CloudRunner(object):
         if len(r) != 2:
             raise Exception('Error: {}'.format(r[0]))
 
-        return json.loads(resp)
+        return msgpack.unpackb(resp)
 
     def run_local(self, script_content):
         from cloudrunner.core.process import Processor
@@ -250,7 +259,7 @@ class CloudRunner(object):
         req.append(control='attach')
 
         req.append(session_id=session_id)
-        req.append(data=json.dumps(targets))
+        req.append(data=msgpack.packb(targets))
 
         # we do not know the original timeout,
         self.timeout = sys.maxint / 1000

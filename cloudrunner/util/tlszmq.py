@@ -17,7 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import json
+import msgpack
 import logging
 import M2Crypto as m
 from StringIO import StringIO
@@ -26,6 +26,7 @@ import time
 import zmq
 
 from cloudrunner.util.string import jsonify
+from cloudrunner.core.message import F, M, RT
 
 LOGS = logging.getLogger('TLSZmq Server')
 LOGC = logging.getLogger('TLSZmq Client')
@@ -86,6 +87,20 @@ class TLSZmqServerSocket(object):
         self.conns = {}
         self.verify_func = verify_func
 
+    def _update_conn(self, ident, x509):
+        if x509 and x509.get_serial_number() not in self.CRL:
+            # auth conn
+            subj = x509.get_subject()
+            client_id = subj.CN
+            org_id = subj.O
+            self.conns[ident].node = client_id
+            self.conns[ident].org = org_id
+            return client_id, org_id
+        else:
+            self.conns[ident].node = None
+            self.conns[ident].org = None
+            return None, None
+
     def start(self):
 
         class Conn(object):
@@ -109,7 +124,7 @@ class TLSZmqServerSocket(object):
 
         def prepare_res(ident, node, org, resp):
             if self.route_packets:
-                packets = list(jsonify(*json.loads(resp)))
+                packets = list(*msgpack.unpackb(resp))
                 packets.insert(1, ident)
                 return packets  # [ident, resp]
             else:
@@ -161,7 +176,7 @@ class TLSZmqServerSocket(object):
                         conn = self.conns.pop(ident)
                         proc_socket.send_multipart(
                             prepare_res(ident, conn.node or '', conn.org or '',
-                                        json.dumps(["QUIT"])))
+                                        msgpack.packb(["QUIT"])))
                         conn.conn.shutdown()
                         continue
 
@@ -192,17 +207,7 @@ class TLSZmqServerSocket(object):
                     try:
                         if self.verify_func:
                             x509 = tls.ssl.get_peer_cert()
-                            if x509 and \
-                                    x509.get_serial_number() not in self.CRL:
-                                # auth conn
-                                subj = x509.get_subject()
-                                client_id = subj.CN
-                                org_id = subj.O
-                                self.conns[ident].node = client_id
-                                self.conns[ident].org = org_id
-                            else:
-                                self.conns[ident].node = None
-                                self.conns[ident].org = None
+                            client_id, org_id = self._update_conn(ident, x509)
                         else:
                             self.conns[ident].node = None
                             self.conns[ident].org = None
@@ -212,16 +217,27 @@ class TLSZmqServerSocket(object):
                         self.conns[ident].org = None
                         LOGS.exception(ex)
 
-                    LOGS.debug("GOT DATA: %s" % [repr(ident), plain_data])
+                    LOGS.debug("GOT DATA: %s" % [repr(ident),
+                                                client_id,
+                                                org_id,
+                                                plain_data])
+                    #packets = msgpack.unpackb(plain_data)
 
-                    packets = plain_data.split('\x00')
-                    for packet in packets:
+                    # for packet in packets:
+                    packet = packets
+                    if True:
                         if packet:
-                            proc_socket.send_multipart(
-                                prepare_res(ident, client_id, org_id or '',
-                                            packet))
+                            frame = F(ident,
+                                          client_id,
+                                          org_id or '',
+                                          plain_data)
+
+                            LOGS.debug("RECV FRAME: %r" % frame._)
+
+                            proc_socket.send_multipart(frame._)
 
                 if data:
+                    LOGS.info("Sending SSL DATA: %r" % data)
                     tls.send(data)
                     # LOGS.debug("SENDING DATA: %s" % [repr(ident), data])
                     try:
@@ -367,11 +383,11 @@ class TLSZmqClientSocket(object):
                 if self.socket_proc in socks:
                     data = self.recv_from_worker()
                     if self.route_packets:
-                        data.pop(0)  # sender
-                    LOGC.debug("Data to send %s" % data[:2])
+                        data = data[1]  # .pop(0)  # sender
+                    LOGC.info("Data to send %r" % data)
 
-                    self.tls.send(json.dumps(data))
-                    self.tls.send('\x00')  # separator
+                    self.tls.send(data)
+                    # self.tls.send('\x00')  # separator
                     self.tls.update()
 
                 if not self.init.is_set():
@@ -393,25 +409,27 @@ class TLSZmqClientSocket(object):
                         retry_count -= 1
                         LOGC.warn("Retries left: %s" % retry_count)
                         self.renew()
-                        self.tls.send(json.dumps(data))
+                        self.tls.send(data)
                         self.tls.update()
                     except Exception, ex:
                         LOGC.exception(ex)
                         break
 
                 if self.tls.can_recv():
-                    resp_json = self.tls.recv()
+                    frames = msgpack.unpackb(self.tls.recv())
+                    resp = RT(*frames)
                     retry_count = 5
                     if self.validate_peer:
                         x509 = self.tls.ssl.get_peer_cert()
                         if not self.validate_peer(x509):
                             continue
                     try:
-                        resp = json.loads(resp_json)
-                        LOGC.debug("Data recvd %s" % resp)
-                        self.socket_proc.send_multipart(list(jsonify(*resp)))
+                        LOGC.info("Data recvd %r" % resp)
+                        self.socket_proc.send_multipart([resp.dest, resp.msg])
                     except ValueError:
-                        LOGC.error("Cannot decode message %s" % resp_json)
+                        LOGC.error("Cannot decode message %s" % resp)
+                    except Exception, ex:
+                        LOGC.error("Error %r" % ex)
 
             except ConnectionException, connex:
                 LOGC.error(connex)

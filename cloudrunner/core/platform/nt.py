@@ -23,7 +23,7 @@ if os.name != 'nt':
     raise unittest.case.SkipTest(
         "The rest of this code will not be run on Linux.")
 
-import json
+import msgpack
 import logging
 import os
 import threading
@@ -74,7 +74,7 @@ class CredentialManager(object):
         self.credentials = {}
         try:
             with open(credentials_map_file) as f:
-                cred_map = json.loads(f.read())
+                cred_map = msgpack.unpackb(f.read())
 
             for user, pwd in cred_map.items():
                 cred = Cred(user, pwd)

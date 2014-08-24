@@ -1,4 +1,4 @@
-import json
+import msgpack
 import logging
 import requests
 import time
@@ -13,14 +13,14 @@ R_LOG.setLevel(logging.ERROR)
 
 class OutputterMixin(object):
 
-    def pipe(self, seq, uuid, step, run_as, node, stdout, stderr):
-        return (StatusCodes.PIPEOUT, '', StatusCodes.PIPEOUT,
-                uuid, seq, step, '', '', uuid,
+    def pipe(self, seq, ts, uuid, step, run_as, node, stdout, stderr):
+        return (StatusCodes.PIPEOUT, ts, StatusCodes.PIPEOUT,
+                uuid, ts, seq, step, '', '', uuid,
                 run_as, node, stdout, stderr)
 
-    def finished(self, seq, uuid, response):
-        return (StatusCodes.FINISHED, '', StatusCodes.FINISHED,
-                uuid, seq, '', '', response)
+    def finished(self, seq, ts, uuid, step, result):
+        return (StatusCodes.FINISHED, ts, StatusCodes.FINISHED,
+                uuid, ts, seq, '', '', step, result)
 
 
 class Dispatch(OutputterMixin):
@@ -39,7 +39,7 @@ class Dispatch(OutputterMixin):
         yield "Starting"
         inc = 1
         r = send_func(self.method, self.path,
-                      data=json.dumps(self.initial)).json()
+                      data=msgpack.packb(self.initial),).json()
         try:
             _uuid = r.get('dispatch', {}).get('uuid')
 
@@ -57,28 +57,43 @@ class Dispatch(OutputterMixin):
                                     "Invalid response from server: %s" %
                                     r.status_code)
                 r = r.json()
-                log_info = r['output']
-                status = log_info.get('status')
-                etag = log_info.get('etag', 0)
-                for out in log_info.get('steps', []):
-                    if "stdout" in out or "stderr" in out:
-                        yield self.pipe(inc, _uuid, out['step'],
-                                        out['run_as'],
-                                        out['node'],
-                                        '\n'.join(out.get('stdout', [])),
-                                        '\n'.join(out.get('stderr', [])),
-                                        )
-                    inc += 1
-                if status == "finished":
-                    r = send_func('get', "logs:get", args=[_uuid],
-                                  headers={'Etag': etag}).json()
-                    log_info = r['log']
-                    yield self.finished(0, _uuid, log_info)
-                    break
+                outputs = r['outputs']
+                for log_info in outputs:
+                    status = log_info.get('status')
+                    etag = int(log_info.get('etag', 0)) + 1
+                    for step in log_info.get('steps', []):
+                        lines = step.get('lines')
+                        step_id = step.get('step')
+                        if lines:
+                            for line in lines:
+                                #ts = time.mktime(lines.pop(0))
+                                ts = line.pop(0)
+                                out_type = line.pop(0)
+                                stdout, stderr = "", ""
+                                if out_type == 'O':
+                                    # stdout
+                                    stdout = "\n".join(line)
+                                elif out_type == 'E':
+                                    # stderr
+                                    stderr = "\n".join(line)
+                                yield self.pipe(inc, ts, _uuid,
+                                                step_id,
+                                                step.get('run_as'),
+                                                step['node'],
+                                                stdout,
+                                                stderr
+                                                )
+                                inc += 1
+                        if status == "finished":
+                            log_info = step['result']
+
+                            yield self.finished(inc, ts, _uuid,
+                                                step_id, log_info)
+                            running = False
                 time.sleep(1)
 
         except Exception:
-            # LOG.exception(ex)
+            LOG.exception(ex)
             raise StopIteration("Cannot start remote execution on server")
         finally:
             raise StopIteration()
@@ -100,7 +115,7 @@ class ListNodes(object):
         yield "Starting"
         r = send_func(self.method, self.path)
         try:
-            yield r.json()['nodes']
+            yield [n[0] for n in r.json()['nodes']]
         except Exception:
             # LOG.exception(ex)
             raise StopIteration("Cannot start remote execution on server")
@@ -306,8 +321,11 @@ class OpQueue(object):
         self.iter.send(self.partial_send)
 
     def recv(self, timeout=2):
-        ret_value = self.iter.next()
-        return ret_value
+        try:
+            ret_value = self.iter.next()
+            return ret_value
+        except StopIteration:
+            return None
 
 
 class RESTTransport(TransportBackend):

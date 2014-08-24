@@ -17,7 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import json
+import msgpack
 import logging
 import os
 import platform
@@ -127,7 +127,7 @@ class Python(Base, StatePluginBase):
             current_file)
         prepare_e.append("from env_string_proxy import __enter, __exit")
         prepare_e.append("global __env__old__items")
-        prepare_e.append("__enter('%s')" % json.dumps(self.env).replace("'",
+        prepare_e.append("__enter('%s')" % msgpack.packb(self.env).replace("'",
                                                                         "\\'"))
         prepare_env = "\n".join(prepare_e)
 
@@ -152,7 +152,7 @@ class Python(Base, StatePluginBase):
             if k in DISABLED_ENV or not KEY_RE.match(k):
                 continue
             try:
-                after[k] = json.loads(v)
+                after[k] = msgpack.unpackb(v)
             except:
                 continue
 
@@ -331,7 +331,7 @@ class NodeJS(Base, StatePluginBase):
                 prepare_env += 'var %s = "%s"\n' % (
                     k, v.replace('"', '\\"'))
             else:
-                prepare_env = "var %s = %s;\n" % (k, json.dumps(v))
+                prepare_env = "var %s = %s;\n" % (k, msgpack.packb(v))
 
         return (prepare_env, store_env, '.js')
 
@@ -442,7 +442,7 @@ class PowerShell(StatePluginBase):
 
 def __enter(_env):
     import os
-    env = json.loads(_env)
+    env = msgpack.unpackb(_env)
     for k, v in env.items():
         if k == ENV_FILE_NAME:
             os.environ[k] = env[ENV_FILE_NAME]
@@ -468,7 +468,7 @@ def __exit(exit_code):
            if (k, v) not in __env__old__items]  # noqa
     __env__file = open(environ[ENV_FILE_NAME], 'w')
     for k, v in k_v:
-        __env__file.write('%s=%s\n' % (k, json.dumps(v)))
+        __env__file.write('%s=%s\n' % (k, msgpack.packb(v)))
     __env__file.close()
     del __env__old__items
     del __env__new__items

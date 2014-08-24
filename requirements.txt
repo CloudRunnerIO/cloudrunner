@@ -2,3 +2,4 @@ pyzmq
 M2Crypto
 httplib2
 argparse
+msgpack-python

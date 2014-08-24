@@ -41,7 +41,7 @@ try:
 except ImportError:
     pass
 import argparse
-import json
+import msgpack
 import os
 import signal
 from threading import Thread
@@ -49,7 +49,7 @@ from threading import Event
 
 from cloudrunner.core import parser
 from cloudrunner.core.exceptions import ConnectionError
-from cloudrunner.core.message import StatusCodes
+from cloudrunner.core.message import StatusCodes, Ready, Job, M
 from cloudrunner.core.process import Processor
 from cloudrunner.node.matcher import Matcher
 from cloudrunner.plugins.transport.base import TransportBackend
@@ -265,10 +265,10 @@ class AgentNode(Daemon):
             self.session_id = str(session_id)
             self.done = False
             self.backend = backend
-            self.queue = backend.publish_queue('jobs', ident=self.session_id)
-            self.queue.send(self.session_id, StatusCodes.READY)
-
             LOG.info("Creating session %s" % self.session_id)
+            self.queue = backend.publish_queue('jobs', ident=self.session_id)
+            ready_msg = Ready.build(self.session_id, StatusCodes.READY)
+            self.queue.send([ready_msg._])
 
         def _close(self):
             self.done = True
@@ -281,36 +281,35 @@ class AgentNode(Daemon):
             self._close()
 
         def _yield_reply(self, *reply):
-            LOG.debug("[%s] Yielding %s" % (self.session_id, reply[0]))
+            LOG.info("[%s] Yielding %s" % (self.session_id, reply))
             try:
-                self.queue.send(self.session_id, *list(reply))
+                frames = list(reply)
+                frames.insert(1, self.session_id)
+                reply = M.build(*frames)
+                self.queue.send([reply._])
             except ConnectionError:
                 self._close()
 
         def run(self):
-            self.job_attr = self.queue.recv(2)
-            if not self.job_attr:
+            data = self.queue.recv(2)
+            if not data:
                 LOG.error("[%s] Timeout waiting for Job description" %
                           self.session_id)
                 self._close()
                 return
-            command = self.job_attr[0].lower()
-            if not hasattr(self, command):
+            job = M.build(*msgpack.unpackb(data[0]))
+            if not job:
                 LOG.error('Session %s: UNKNOWN COMMAND RECEIVED:: %s' % (
-                    self.session_id, command))
+                    self.session_id, job_attr))
                 return
 
-            LOG.info("Session::%s: command:: %s" % (self.session_id, command))
+            LOG.info("Session::%s: job:: %r" % (self.session_id, job))
 
-            return getattr(self, command)(*self.job_attr[1:])
+            if isinstance(job, Job):
+                self.job(job.remote_user, job.request)
 
-        def job(self, *args):
+        def job(self, remote_user, request):
             LOG.info('Recv:: JOB for session %s', self.session_id)
-            try:
-                remote_user, request = json.loads(args[0])
-            except ValueError:
-                LOG.error('Malformed request received: %s' % args[0])
-                return
             command = request['script']
             env = request['env']
             proc = Processor(remote_user)
@@ -337,14 +336,14 @@ class AgentNode(Daemon):
             # For long-running jobs
             # self.socket.send_multipart([self.session_id,
             #                            StatusCodes.WORKING,
-            #                            json.dumps(dict(stdout=value))])
+            #                            msgpack.packb(dict(stdout=value))])
 
             proc_iter = iter(proc.run(command, lang, env, inlines=incl_header))
             proc = next(proc_iter)
 
             def _encode(data):
                 try:
-                    return json.dumps(data)
+                    return msgpack.packb(data)
                 except:
                     return ""
 
@@ -386,38 +385,25 @@ class AgentNode(Daemon):
                         if fd_type == proc.STDOUT:
                             data = proc.read_out()
                             if data:
-                                enc_data = _encode(dict(stdout=data))
-                                if enc_data:
-                                    self._yield_reply(
-                                        StatusCodes.STDOUT,
-                                        proc.run_as,
-                                        enc_data)
+                                self._yield_reply(StatusCodes.STDOUT,
+                                                  proc.run_as, data)
                         if fd_type == proc.STDERR:
                             data = proc.read_err()
                             if data:
-                                enc_data = _encode(dict(stderr=data))
-                                if enc_data:
-                                    self._yield_reply(
-                                        StatusCodes.STDERR,
-                                        proc.run_as,
-                                        enc_data)
+                                self._yield_reply(StatusCodes.STDERR,
+                                                  proc.run_as, data)
 
                 run_as, ret_code, stdout, stderr, env = next(proc_iter)
             else:
                 # Error invoking Popen, get params
                 run_as, ret_code, stdout, stderr, env = proc
                 if stdout:
-                    self._yield_reply(StatusCodes.STDOUT,
-                                      run_as,
-                                      json.dumps(dict(stdout=stdout)))
+                    self._yield_reply(StatusCodes.STDOUT, run_as, stdout)
                 if stderr:
-                    self._yield_reply(StatusCodes.STDERR,
-                                      run_as,
-                                      json.dumps(dict(stderr=stderr)))
+                    self._yield_reply(StatusCodes.STDERR, run_as, stderr)
 
-            job_result = json.dumps(dict(env=env,
-                                         ret_code=ret_code,
-                                         stdout=stdout, stderr=stderr))
+            job_result = dict(env=env, ret_code=ret_code,
+                              stdout=stdout, stderr=stderr)
             LOG.info('Job [%s] DONE' % (self.session_id))
             self._yield_reply(StatusCodes.FINISHED, run_as, job_result)
 
@@ -447,7 +433,8 @@ class AgentNode(Daemon):
                 self.sessions[session_id] = session
                 return True
             except Exception, ex:
-                LOG.error("Cannot start Job Session: %r" % ex)
+                LOG.error("Cannot start Job Session")
+                LOG.exception(ex)
         return False
 
     def clean(self, *args):

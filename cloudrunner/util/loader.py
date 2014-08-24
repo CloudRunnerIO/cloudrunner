@@ -43,13 +43,12 @@ def local_plugin_loader(klass):
         return None
 
 
-def load_plugins(config):
+def load_plugins(config, bases=PLUGIN_BASES):
     plugins = {}
     items = sorted(config.plugins.items(), key=lambda x: x[0])
 
     plugin_module = imp.new_module('cloudrunner.plugins.custom')
     sys.modules['cloudrunner.plugins.custom'] = plugin_module
-
     for (item, value) in items:
         if '.' in item:
             # Set plugin property
@@ -62,7 +61,7 @@ def load_plugins(config):
         else:
             # Instantiate plugin
             try:
-                plugins[item] = load_plugins_from(value, PLUGIN_BASES)
+                plugins[item] = load_plugins_from(value, bases)
             except IOError, iex:
                 LOG.error('Problem loading %s' % value)
                 LOG.error(iex)
@@ -81,7 +80,16 @@ def load_plugins_from(module_str, base_filter):
         mod_name = module_str.rpartition('/')[2]
         mod_name = mod_name.rpartition('.')[0]
         mod_ref = 'cloudrunner.plugins.custom.' + mod_name
-        imp.load_source(mod_ref, module_str)
+        _mod = imp.load_source(mod_ref, module_str)
+        classes = set()
+        for memb in inspect.getmembers(_mod, inspect.isclass):
+            try:
+                if issubclass(memb[1], tuple(base_filter)) \
+                        and not memb[1] in base_filter:
+                    classes.add(memb[1])
+            except:
+                pass
+        return list(classes)
     else:
         tokens = module_str.split('.')
 

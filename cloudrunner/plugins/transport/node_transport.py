@@ -17,7 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import json
+import msgpack
 import logging
 import M2Crypto as m
 import os
@@ -217,7 +217,7 @@ class NodeTransport(TransportBackend):
                     peer = session_map.get(frames.pop(0)) or ''
                     if peer:
                         frames.insert(1, self.node_id)
-                        dispatcher.send_multipart([peer, json.dumps(frames)])
+                        dispatcher.send_multipart([peer, msgpack.packb(frames)])
             except KeyboardInterrupt:
                 LOGC.info('Exiting node listener thread')
                 break

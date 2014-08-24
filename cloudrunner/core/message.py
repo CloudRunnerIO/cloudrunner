@@ -17,8 +17,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 import abc
-
-import json
+from collections import OrderedDict
+import logging
+import msgpack
 
 from cloudrunner.util.string import stringify1
 
@@ -28,6 +29,7 @@ TOKEN_SEPARATOR = '~~~~~'
 ADMIN_TOWER = 'cloudrunner-control'
 HEARTBEAT = 'cloudrunner-heartbeat'
 DEFAULT_ORG = 'DEFAULT'
+LOG = logging.getLogger()
 
 
 class StatusCodes(object):
@@ -60,7 +62,41 @@ def is_valid_host(host):
         ADMIN_TOWER.lower(), HEARTBEAT.lower()))
 
 
-class BaseMessage(object):
+class MsgType(type):
+
+    def __init__(cls, name, bases, dct):
+        if not hasattr(cls, 'registry'):
+            # this is the base class.  Create an empty registry
+            cls.registry = {}
+        else:
+            # this is a derived class.  Add cls to the registry
+            interface_id = name.upper()
+            cls.registry[interface_id] = cls
+
+        super(MsgType, cls).__init__(name, bases, dct)
+
+    def __call__(cls, *args):
+        values = list(args)
+        if cls is M:
+            # Generic call
+            msg_name = values.pop(0).upper()
+            cls = cls.registry[msg_name]
+        LOG.info("Creating %s with [%s]" % (cls, values))
+        obj = super(MsgType, cls).__call__()
+        for i, field in enumerate(obj.fields):
+            if i >= len(values):
+                break
+            if hasattr(obj, 'mod_' + field):
+                v = getattr(obj, 'mod_' + field)(values[i])
+            else:
+                v = values[i]
+            setattr(obj, field, v)
+        return obj
+
+
+class M(object):
+    __metaclass__ = MsgType
+    dest = ''
 
     def _str(self, value):
         if isinstance(value, unicode):
@@ -71,50 +107,57 @@ class BaseMessage(object):
     def __str__(self):
         return str(vars(self).items())
 
+    def __repr__(self):
+        return str(vars(self))
+
+    @property
+    def control(self):
+        return self.__class__.__name__.upper()
+
+    def values(self, skip=[]):
+        if skip:
+            return [getattr(self, f, '') for f in self.fields if f not in skip]
+        else:
+            return [getattr(self, f, '') for f in self.fields]
+
+    def pack(self, skip=[]):
+        return msgpack.packb([self.control] + self.values(skip=skip))
+
+    _ = property(pack)
+
+    @classmethod
+    def repack(cls, pack):
+        args = pack.values
+        try:
+            obj = cls(*args)
+            return obj
+        except Exception, ex:
+            LOG.warn(args)
+            LOG.exception(ex)
+            return False
+
     @classmethod
     def build(cls, *args):
         try:
             obj = cls(*args)
             return obj
-        except Exception:
+        except Exception, ex:
+            LOG.exception(ex)
             return False
 
-
-class AgentReq(BaseMessage):
-
-    def __init__(self, login=None, auth_type=1, password=None, control=None,
-                 data=None, extra_json=None):
-        self.login = self._str(login)
-        self.password = self._str(password)
-        self.auth_type = int(auth_type)
-        self.control = self._str(control)
-        if data:
-            self.data = self._str(data)
-        else:
-            self.data = data
-        self.kwargs = {}
-        if extra_json:
-            self.kwargs = json.loads(extra_json)
-
-    def append(self, **kwargs):
-        for k, v in kwargs.items():
-            if hasattr(self, k):
-                setattr(self, k, self._str(v))
-            else:
-                self.kwargs[k] = self._str(v)
-
-    def pack(self, extra=False):
-        if extra:
-            return [self.login, str(self.auth_type),
-                    self.password, self.control,
-                    self.data or '', json.dumps(self.kwargs)]
-        else:
-            return [self.login, str(self.auth_type),
-                    self.password, self.control,
-                    self.data or '']
+    @classmethod
+    def unpack(cls, pack):
+        args = msgpack.unpackb(pack)
+        return M.build(*args)
 
 
-class ScheduleReq(BaseMessage):
+class Dispatch(M):
+
+    dest = ''
+    fields = ["user", "roles", "data", "libraries"]
+
+
+class ScheduleReq(M):
 
     def __init__(self, control, job_id):
         self.control = self._str(control)
@@ -124,7 +167,7 @@ class ScheduleReq(BaseMessage):
         return [self.control, self.job_id]
 
 
-class HeartBeatReq(BaseMessage):
+class HeartBeatReq(M):
 
     """
     \x00k\x01, node_id, Org, ACTION
@@ -137,73 +180,35 @@ class HeartBeatReq(BaseMessage):
         self.control = control
 
 
-class FwdReq(BaseMessage):
+class FwdReq(M):
 
     """
-    ident, json_packet
+    ident, data_packet
     """
 
     def __init__(self, ident, datagram, *args):
         self.ident = ident
-        self.data = json.loads(datagram)
+        self.data = msgpack.packb(datagram)
 
 
-class ClientReq(BaseMessage):
+class ClientReq(M):
 
-    def __init__(self, ident, peer, org, datagram):
-        self.ident = ident
-        self.peer = peer
-        self.org = org
-        if datagram:
-            try:
-                data = json.loads(datagram)
-            except ValueError:
-                data = None
-        if data:
-            if len(data) > 1:
-                self.dest = str(data[0])
-                self.control = str(data[1])
-                if len(data) > 2:
-                    self.data = str(data[2])
-                else:
-                    self.data = None
-                if len(data) > 3:
-                    self.extra = str(data[3])
-                else:
-                    self.extra = None
-            else:
-                self.control = str(data[0])
-                self.dest = None
-                self.data = None
-                self.extra = None
-        else:
-            self.dest = None
-            self.control = None
-            self.data = None
-            self.extra = None
+    fields = ['ident', 'peer', 'org', 'data', 'extra']
+
+    def mod_data(self, val):
+        if val:
+            self.data = msgpack.unpackb(val)
+        return val
+
+    mod_extra = mod_data
 
 
-class RerouteReq(BaseMessage):
+class RerouteReq(M):
 
-    def __init__(self, req):
-        self.dest = req.dest
-        self.ident = req.ident
-        self.org = req.org
-        self.peer = req.peer
-        self.control = req.control
-        self.data = req.data
-        self.extra = req.extra
-
-    def pack(self):
-        packed = [str(self.dest), str(self.ident), self.peer or '',
-                  str(self.org), str(self.control), self.data or '']
-        if self.extra:
-            packed.append(self.extra)
-
-        return packed
+    fields = ['dest', 'ident', 'org', 'peer', 'control', 'data', 'extra']
 
 
-class ControlReq(BaseMessage):
+class ControlReq(M):
 
     def __init__(self, ident, peer, org, control, node, data=None, extra=None):
         self.ident = ident
@@ -218,10 +223,63 @@ class ControlReq(BaseMessage):
         if extra:
             self.extra = extra
 
+
+class Ident(M):
+
+    dest = HEARTBEAT
+    fields = []
+
+
+class Welcome(M):
+
+    dest = HEARTBEAT
+    fields = []
+
+
+class Reload(M):
+
+    dest = HEARTBEAT
+    fields = []
+
+
+class HB(M):
+
+    dest = HEARTBEAT
+    fields = []
+
+
+class HBR(M):
+
+    dest = HEARTBEAT
+    fields = ['node']
+
+
+class Init(M):
+    dest = 'INIT'
+    fields = ['org_id', 'org_name', 'session_key', 'session_iv']
+
+
+class Quit(M):
+    dest = ''
+    fields = []
+
+
+class Term(M):
+    fields = ['dest', 'reason']
+
+
+class Input(M):
+    fields = ['dest', 'cmd', 'data']
+
+
+class Crypto(M):
+    dest = ''
+    fields = ['message']
+
 # Replies
 
 
-class RegisterRep(BaseMessage):
+class RegisterRep(M):
 
     def __init__(self, frames):
         self.reply = frames[0]
@@ -231,7 +289,7 @@ class RegisterRep(BaseMessage):
             self.data = ''
 
 
-class ClientRep(BaseMessage):
+class ClientRep(M):
 
     def __init__(self, ident, peer, dest, control, *args):
         self.ident = ident
@@ -247,32 +305,42 @@ class ClientRep(BaseMessage):
 
     def pack(self):
         if self.extra:
-            return [self.ident, json.dumps([self.dest, self.control,
-                                            self.data, self.extra])]
+            return [self.ident, msgpack.packb([self.dest, self.control,
+                                               self.data, self.extra])]
         else:
             return [self.ident,
-                    json.dumps([self.dest, self.control, self.data])]
+                    msgpack.packb([self.dest, self.control, self.data])]
 
 
-class JobRep(BaseMessage):
+class JobRep(M):
+    fields = ['ident', 'peer', 'org', 'msg']
 
-    def __init__(self, ident, peer, org, control,
-                 run_as=None, data=None, *args):
-        self.ident = ident
-        self.peer = peer
-        self.org = org
-        self.control = control
-
-        self.run_as = run_as
-        try:
-            self.data = json.loads(data)
-        except:
-            self.data = None
-        if args:
-            self.extra = list(args)
+    @property
+    def reply(self):
+        return M.build(*msgpack.unpackb(self.msg))
 
 
-class LocalJobRep(BaseMessage):
+class StdOut(M):
+    fields = ['job_id', 'run_as', 'output']
+
+
+class StdErr(M):
+    fields = ['job_id', 'run_as', 'stderr']
+
+
+class Finished(M):
+    fields = ['run_as', 'stdout', 'stderr', 'env', 'ret_code']
+
+
+class Events(M):
+    fields = ['run_as', 'result']
+
+
+class Job(M):
+    fields = ['dest', 'remote_user', 'request']
+
+
+class LocalJobRep(M):
 
     def __init__(self, job_id, peer, control, run_as=None, data=None, *args):
         self.job_id = job_id
@@ -281,14 +349,14 @@ class LocalJobRep(BaseMessage):
 
         self.run_as = run_as
         try:
-            self.data = json.loads(data)
+            self.data = msgpack.unpackb(data)
         except:
             self.data = None
         if args:
             self.extra = list(args)
 
 
-class JobInput(BaseMessage):
+class JobInput(M):
 
     def __init__(self, _, cmd, job_id, user, org,
                  data=None, targets=None, *args):
@@ -298,6 +366,96 @@ class JobInput(BaseMessage):
         self.org = org
         self.data = data
         self.targets = targets
+
+
+# Node
+
+class Ready(M):
+    run_as = ''
+    fields = ['dest', 'status']
+
+# Frames
+
+
+class Frame(object):
+
+    def __init__(self, ident, peer, org, msg):
+        self.ident = ident
+        self.peer = peer
+        self.org = org
+        self.msg = msg
+
+    def __repr__(self):
+        return str(vars(self))
+
+    @property
+    def message(self):
+        if not hasattr(self, '_m'):
+            try:
+                self._m = M.build(*msgpack.unpackb(self.msg))
+            except Exception, ex:
+                print ex
+                return None
+        return self._m
+
+    @property
+    def _(self):
+        return [self.ident, self.peer, self.org, self.msg]
+
+    def reroute(self):
+        if not self.message:
+            raise Exception("Frame message is None")
+        return [self.message.dest, self.ident, self.peer, self.org, self.msg]
+
+    def reply(self, msg):
+        return [self.ident, msg._]
+
+F = Frame
+
+
+class ReplyFrame(object):
+
+    def __init__(self, ident, msg):
+        self.ident = ident
+        self.msg = msg
+
+    def __repr__(self):
+        return str(vars(self))
+
+    @property
+    def message(self):
+        if not hasattr(self, '_m'):
+            try:
+                self._m = M.build(*msgpack.unpackb(self.msg))
+            except Exception, ex:
+                print ex
+                return None
+        return self._m
+
+    @property
+    def _(self):
+        return [self.ident, self.msg]
+
+R = ReplyFrame
+
+
+class RouterFrame(object):
+
+    def __init__(self, *args):
+        _m = M.build(*args)
+        self.dest = _m.dest
+        self.msg = _m.pack()
+
+    def __repr__(self):
+        return str(vars(self))
+
+    @property
+    def _(self):
+        return [self.dest, self.msg]
+
+RT = RouterFrame
+
+# Transport
 
 
 class TransportMessage(object):

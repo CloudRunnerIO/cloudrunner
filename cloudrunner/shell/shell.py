@@ -20,7 +20,7 @@
 
 import cmd
 import glob
-import json
+import msgpack
 import logging
 import os
 import re
@@ -464,7 +464,7 @@ class Shell(cmd.Cmd):
                 if not self.current_session:
                     self.current_session = msg.job_id
 
-                job_id = getattr(msg, "job_id", None)
+                job_id = getattr(msg, "session_id", None)
 
                 if job_id != self.current_session:
                     continue
@@ -484,22 +484,20 @@ class Shell(cmd.Cmd):
                 last_node = msg.node
 
             if isinstance(msg, message.FinishedMessage):
-                job_id = getattr(msg, "job_id", None)
+                job_id = getattr(msg, "session_id", None)
                 if job_id != self.current_session:
                     continue
                 console.green("========== Summary [%s] ==========" %
                               msg.session_id)
                 try:
-                    data = json.loads(msg.response)
-                    for run in data:
-                        self.last_session_id = run["jobid"]
-                        for node in run['nodes']:
-                            line = "%s: exit code: %s" % (node['node'],
-                                                          node['ret_code'])
-                            if node['ret_code']:
-                                console.red(line)
-                            else:
-                                console.yellow(line)
+                    self.last_session_id = None #data.get("jobid")
+                    for node in msg.result:
+                        line = "%s: exit code: %s" % (node['node'],
+                                                      node['ret_code'])
+                        if node['ret_code']:
+                            console.red(line)
+                        else:
+                            console.yellow(line)
                 except:
                     continue
 

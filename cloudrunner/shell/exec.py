@@ -23,7 +23,7 @@ try:
 except ImportError:
     pass
 import argparse
-import json
+import msgpack
 import logging
 import os
 import sys
@@ -273,7 +273,7 @@ class Shell(object):
         self.queue.send(*req.pack())
         success, resp = self.queue.recv(timeout=5)
         try:
-            result = json.loads(resp)
+            result = msgpack.unpackb(resp)
         except:
             console.red('Error: ', resp)
             exit(1)
@@ -344,7 +344,7 @@ class Shell(object):
         req = self._request()
         req.append(control='attach')
 
-        req.append(data=json.dumps(self.args.targets))
+        req.append(data=msgpack.packb(self.args.targets))
         req.append(session_id=self.args.session_id)
         # we do not know the original timeout,
         self.timeout = sys.maxint / 1000
@@ -365,7 +365,7 @@ class Shell(object):
         req.append(control='notify')
 
         req.append(data=data or self._script(tgt='input'))
-        req.append(targets=targets or json.dumps(self.args.targets))
+        req.append(targets=targets or msgpack.packb(self.args.targets))
         req.append(session_id=session_id or self.args.session_id)
         req.append(job_id=job_id or self.args.job_id)
 
@@ -407,7 +407,7 @@ class Shell(object):
             console.red('Error: ', r[0])
             exit(2)
 
-        reply = json.loads(resp)
+        reply = msgpack.unpackb(resp)
         if reply[0]:
             console.blue(reply[1])
         else:
@@ -453,7 +453,7 @@ class Shell(object):
 
         if self.args.env:
             try:
-                self.env = json.loads(self.args.env)
+                self.env = msgpack.unpackb(self.args.env)
             except Exception, ex:
                 LOG.exception(ex)
                 exit(1)
@@ -543,9 +543,9 @@ class Shell(object):
             r = self.queue.recv(timeout=5)
             job_id = None
             if r[0] == 'FINISHED':
-                job_id = json.loads(r[1])[0]['jobid']
+                job_id = msgpack.unpackb(r[1])[0]['jobid']
             if r[0] == 'PIPEOUT':
-                job_id = json.loads(r[1])[0]
+                job_id = msgpack.unpackb(r[1])[0]
 
             return job_id
         self.close()

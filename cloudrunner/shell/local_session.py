@@ -17,7 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import json
+import msgpack
 import logging
 from socket import gethostbyname
 from threading import Thread
@@ -186,7 +186,7 @@ class Session(Thread):
                     for (tgt, host) in hosts:
                         self.worker_sock.send_multipart([
                             tgt, host, 'REQ', self.session_id,
-                            "JOB", json.dumps(['@', request])])
+                            "JOB", msgpack.packb(['@', request])])
                     continue
                 # else:
                 #    self.reply_sock.send_multipart(list(frames))
@@ -226,7 +226,7 @@ class Session(Thread):
 
                 else:
                     # node_map[peer][stdout] =
-                    outputs = json.loads(frames[4])
+                    outputs = msgpack.unpackb(frames[4])
                     outputs.setdefault('stdout', "")
                     outputs.setdefault('stderr', "")
 

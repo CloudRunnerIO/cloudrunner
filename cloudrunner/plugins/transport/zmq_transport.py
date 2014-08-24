@@ -17,7 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import json
+import msgpack
 import logging
 import M2Crypto as m
 import os
@@ -277,7 +277,7 @@ class ZmqCliTransport(TransportBackend):
                     kwargs = {}
                     if args:
                         try:
-                            kwargs = json.loads(args)
+                            kwargs = msgpack.unpackb(args)
                         except:
                             pass
                     try:
@@ -296,7 +296,7 @@ class ZmqCliTransport(TransportBackend):
 
                 if worker in ready:
                     frames = worker.recv_multipart()
-                    data = json.loads(frames[2])
+                    data = msgpack.unpackb(frames[2])
                     if frames[0] != self.curr_session:
                         continue
                     if len(data) > 4 and data[0] != 'FINISHED':
@@ -483,7 +483,7 @@ class SockWrapper(Endpoint):
     def __repr__(self):
         return self.endpoint
 
-    def __strstr__(self):
+    def __str__(self):
         return "SocketWrapper<%s>" % self.endpoint
 
     def fd(self):
@@ -491,8 +491,16 @@ class SockWrapper(Endpoint):
 
     def send(self, *frames):
         try:
-            self._sock.send_multipart([str(f) for f in frames])
+            if len(frames) == 1:
+                if isinstance(frames[0], list):
+                    self._sock.send_multipart(frames[0])
+                else:
+                    self._sock.send(frames[0])
+            else:
+                self._sock.send_multipart(list(frames))
         except zmq.ZMQError, zerr:
+            LOGC.warning(frames)
+            LOGC.exception(zerr)
             if self._sock.context.closed or \
                     zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
                     or zerr.errno == zmq.ENOTSOCK:

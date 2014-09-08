@@ -25,8 +25,7 @@ import threading
 import time
 import zmq
 
-from cloudrunner.util.string import jsonify
-from cloudrunner.core.message import F, M, RT
+from cloudrunner.core.message import M, Quit
 
 LOGS = logging.getLogger('TLSZmq Server')
 LOGC = logging.getLogger('TLSZmq Client')
@@ -98,7 +97,7 @@ class TLSZmqServerSocket(object):
             return client_id, org_id
         else:
             self.conns[ident].node = None
-            self.conns[ident].org = None
+            # self.conns[ident].org = None
             return None, None
 
     def start(self):
@@ -157,7 +156,9 @@ class TLSZmqServerSocket(object):
                         frames = proc_socket.recv_multipart()
                         if self.route_packets:
                             frames.pop(0)
-                        queue.append((2, frames[0], frames[1]))
+                        plain_data = frames[0]
+                        hdr, plain_data = M.pop_header(plain_data)
+                        queue.append((2, hdr.ident, plain_data))
 
                 if queue and not enc_req and not data:
                     _type, ident, val = queue.pop(0)
@@ -172,11 +173,13 @@ class TLSZmqServerSocket(object):
                 if enc_req == '-255':
                     # Remove me
                     if ident in self.conns:
-                        LOGS.debug('Removing %s from cache' % repr(ident))
                         conn = self.conns.pop(ident)
-                        proc_socket.send_multipart(
-                            prepare_res(ident, conn.node or '', conn.org or '',
-                                        msgpack.packb(["QUIT"])))
+                        LOGS.debug('Removing %s from cache' % vars(conn))
+                        m = Quit(conn.node)
+                        m.hdr.ident = ident
+                        m.hdr.peer = conn.node or ''
+                        m.hdr.org = conn.org or ''
+                        proc_socket.send(m._)
                         conn.conn.shutdown()
                         continue
 
@@ -218,34 +221,30 @@ class TLSZmqServerSocket(object):
                         LOGS.exception(ex)
 
                     LOGS.debug("GOT DATA: %s" % [repr(ident),
-                                                client_id,
-                                                org_id,
-                                                plain_data])
-                    #packets = msgpack.unpackb(plain_data)
+                                                 client_id,
+                                                 org_id,
+                                                 plain_data])
 
-                    # for packet in packets:
-                    packet = packets
-                    if True:
-                        if packet:
-                            frame = F(ident,
-                                          client_id,
-                                          org_id or '',
-                                          plain_data)
-
-                            LOGS.debug("RECV FRAME: %r" % frame._)
-
-                            proc_socket.send_multipart(frame._)
+                    header = dict(ident=ident,
+                                  peer=client_id,
+                                  org=org_id or '')
+                    try:
+                        plain_data = M.set_header(plain_data, header)
+                        LOGS.debug("Repacked msg: %r" % plain_data)
+                        proc_socket.send(plain_data)
+                    except Exception, ex:
+                        LOGS.exception(ex)
 
                 if data:
-                    LOGS.info("Sending SSL DATA: %r" % data)
+                    LOGS.debug("Sending SSL DATA: %s" % data)
                     tls.send(data)
                     # LOGS.debug("SENDING DATA: %s" % [repr(ident), data])
                     try:
                         flushed = tls.update()
                         if self.verify_func and flushed and \
                                 not self.conns[ident].node:
-                            LOGS.info("Anon connection, dropping %s" %
-                                      repr(ident))
+                            LOGS.debug("Anon connection, dropping %s" %
+                                       repr(ident))
                             # Remove cached ssl obj for unauth reqs
                             conn = self.conns.pop(ident)
                             conn.conn.shutdown()
@@ -359,13 +358,17 @@ class TLSZmqClientSocket(object):
         self.init.set()
 
     def recv_from_worker(self):
-        return self.socket_proc.recv_multipart()
+        if self.route_packets:
+            return self.socket_proc.recv_multipart()[1]
+        else:
+            return self.socket_proc.recv()
 
     def start(self):
         if self.route_packets:
             self.socket_proc = self.context.socket(zmq.ROUTER)
         else:
             self.socket_proc = self.context.socket(zmq.DEALER)
+            self.socket_proc.setsockopt(zmq.IDENTITY, 'SSL_PROXY')
         if self.bind_socket:
             self.socket_proc.bind(self.socket_proc_uri)
         else:
@@ -382,9 +385,7 @@ class TLSZmqClientSocket(object):
 
                 if self.socket_proc in socks:
                     data = self.recv_from_worker()
-                    if self.route_packets:
-                        data = data[1]  # .pop(0)  # sender
-                    LOGC.info("Data to send %r" % data)
+                    LOGC.debug("Data to send %r" % data)
 
                     self.tls.send(data)
                     # self.tls.send('\x00')  # separator
@@ -416,18 +417,17 @@ class TLSZmqClientSocket(object):
                         break
 
                 if self.tls.can_recv():
-                    frames = msgpack.unpackb(self.tls.recv())
-                    resp = RT(*frames)
+                    packed = self.tls.recv()
+                    LOGC.debug("Data recvd %r" % packed)
                     retry_count = 5
                     if self.validate_peer:
                         x509 = self.tls.ssl.get_peer_cert()
                         if not self.validate_peer(x509):
                             continue
                     try:
-                        LOGC.info("Data recvd %r" % resp)
-                        self.socket_proc.send_multipart([resp.dest, resp.msg])
+                        self.socket_proc.send(packed)
                     except ValueError:
-                        LOGC.error("Cannot decode message %s" % resp)
+                        LOGC.error("Cannot decode message %s" % packed)
                     except Exception, ex:
                         LOGC.error("Error %r" % ex)
 

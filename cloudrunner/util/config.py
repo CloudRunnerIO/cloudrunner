@@ -108,7 +108,6 @@ class Config(ConfigBase):
 
     def configure(self):
         self.add_section("security", "Security")
-        self.add_section("users", "Users")
         self.add_section("plugins", "Plugins")
         self.add_section("run_as", "Run_as")
         self.add_section("logging", "Logging")

@@ -49,7 +49,7 @@ from threading import Event
 
 from cloudrunner.core import parser
 from cloudrunner.core.exceptions import ConnectionError
-from cloudrunner.core.message import StatusCodes, Ready, Job, M
+from cloudrunner.core.message import StatusCodes, Ready, Job, M, JobTarget
 from cloudrunner.core.process import Processor
 from cloudrunner.node.matcher import Matcher
 from cloudrunner.plugins.transport.base import TransportBackend
@@ -229,7 +229,8 @@ class AgentNode(Daemon):
             exit(1)
 
         def request_processor():
-            req_queue = self.backend.consume_queue('requests')
+            req_queue = self.backend.consume_queue('requests',
+                                                   ident="DISPATCHER")
             poller = self.backend.create_poller(req_queue)
             while not self.running.is_set():
                 try:
@@ -237,12 +238,16 @@ class AgentNode(Daemon):
                     if not ready:
                         continue
                     if req_queue in ready:
-                        message = req_queue.recv()
+                        message = req_queue.recv()[0]
                         if not message:
                             continue
-                        self.target_match(*message)
+                        job = JobTarget.build(message)
+                        if job:
+                            self.target_match(job)
                 except ConnectionError:
                     break
+                except Exception:
+                    continue
             req_queue.close()
 
         Thread(target=request_processor).start()
@@ -267,8 +272,8 @@ class AgentNode(Daemon):
             self.backend = backend
             LOG.info("Creating session %s" % self.session_id)
             self.queue = backend.publish_queue('jobs', ident=self.session_id)
-            ready_msg = Ready.build(self.session_id, StatusCodes.READY)
-            self.queue.send([ready_msg._])
+            ready_msg = Ready(self.session_id, StatusCodes.READY)
+            self.queue.send(ready_msg._)
 
         def _close(self):
             self.done = True
@@ -284,9 +289,12 @@ class AgentNode(Daemon):
             LOG.info("[%s] Yielding %s" % (self.session_id, reply))
             try:
                 frames = list(reply)
+                # Dest
                 frames.insert(1, self.session_id)
-                reply = M.build(*frames)
-                self.queue.send([reply._])
+                # JobId
+                frames.insert(1, self.session_id)
+                reply = M(*frames)
+                self.queue.send(reply._)
             except ConnectionError:
                 self._close()
 
@@ -297,7 +305,7 @@ class AgentNode(Daemon):
                           self.session_id)
                 self._close()
                 return
-            job = M.build(*msgpack.unpackb(data[0]))
+            job = M.build(data[0])
             if not job:
                 LOG.error('Session %s: UNKNOWN COMMAND RECEIVED:: %s' % (
                     self.session_id, job_attr))
@@ -424,13 +432,12 @@ class AgentNode(Daemon):
             LOG.info("Session::%s :: ERR:: %s" % (self.session_id, args))
             self._close()
 
-    def target_match(self, *args):
-        session_id, targets = args[0], args[1]
-        if self.matcher.is_match(targets):
+    def target_match(self, job):
+        if self.matcher.is_match(job.targets):
             try:
-                session = AgentNode.Session(session_id, self.backend)
+                session = AgentNode.Session(job.job_id, self.backend)
                 session.start()
-                self.sessions[session_id] = session
+                self.sessions[job.job_id] = session
                 return True
             except Exception, ex:
                 LOG.error("Cannot start Job Session")

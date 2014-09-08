@@ -16,20 +16,18 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-import abc
-from collections import OrderedDict
 import logging
 import msgpack
-
-from cloudrunner.util.string import stringify1
 
 # Requests
 
 TOKEN_SEPARATOR = '~~~~~'
-ADMIN_TOWER = 'cloudrunner-control'
-HEARTBEAT = 'cloudrunner-heartbeat'
+ADMIN_TOWER = '_CTRL'
+HEARTBEAT = '_HB'
 DEFAULT_ORG = 'DEFAULT'
-LOG = logging.getLogger()
+LOG = logging.getLogger('CR MSG')
+
+LOG.setLevel(logging.ERROR)
 
 
 class StatusCodes(object):
@@ -62,6 +60,30 @@ def is_valid_host(host):
         ADMIN_TOWER.lower(), HEARTBEAT.lower()))
 
 
+class DictWrapper(dict):
+
+    def __getattr__(self, item):
+        if item in self.keys():
+            return self[item]
+        else:
+            raise IndexError(item)
+
+    def __setattr__(self, item, value):
+        self[item] = value
+
+
+class SafeDictWrapper(dict):
+
+    def __getattr__(self, item):
+        if item in self.keys():
+            return self[item]
+        else:
+            return ''
+
+    def __setattr__(self, item, value):
+        self[item] = value
+
+
 class MsgType(type):
 
     def __init__(cls, name, bases, dct):
@@ -75,14 +97,20 @@ class MsgType(type):
 
         super(MsgType, cls).__init__(name, bases, dct)
 
-    def __call__(cls, *args):
+    def __call__(cls, *args, **kwargs):
         values = list(args)
         if cls is M:
             # Generic call
-            msg_name = values.pop(0).upper()
+            msg_name = kwargs.get('c')
+            if not msg_name:
+                msg_name = values.pop(0)
+            msg_name = msg_name.upper()
             cls = cls.registry[msg_name]
-        LOG.info("Creating %s with [%s]" % (cls, values))
+        LOG.info("Creating %s with `%s`" % (cls, values))
         obj = super(MsgType, cls).__call__()
+        obj.kw = []
+        obj.hdr = SafeDictWrapper()
+
         for i, field in enumerate(obj.fields):
             if i >= len(values):
                 break
@@ -90,6 +118,13 @@ class MsgType(type):
                 v = getattr(obj, 'mod_' + field)(values[i])
             else:
                 v = values[i]
+            setattr(obj, field, v)
+        for field, value in kwargs.items():
+            obj.kw.append(field)
+            if hasattr(obj, 'mod_' + field):
+                v = getattr(obj, 'mod_' + field)(value)
+            else:
+                v = value
             setattr(obj, field, v)
         return obj
 
@@ -114,47 +149,140 @@ class M(object):
     def control(self):
         return self.__class__.__name__.upper()
 
-    def values(self, skip=[]):
-        if skip:
-            return [getattr(self, f, '') for f in self.fields if f not in skip]
-        else:
-            return [getattr(self, f, '') for f in self.fields]
+    def values(self):
+        d = dict((f, getattr(self, f, ''))
+                 for f in self.fields + self.kw)
+        d['c'] = self.control
+        return d
 
-    def pack(self, skip=[]):
-        return msgpack.packb([self.control] + self.values(skip=skip))
+    def pack(self):
+        if hasattr(self, 'dest') and not self.hdr.dest:
+            self.hdr.dest = self.dest
+        return msgpack.packb(self.hdr) + msgpack.packb(self.values())
 
     _ = property(pack)
 
-    @classmethod
-    def repack(cls, pack):
-        args = pack.values
-        try:
-            obj = cls(*args)
-            return obj
-        except Exception, ex:
-            LOG.warn(args)
-            LOG.exception(ex)
-            return False
+    def header(self, **kw):
+        self.hdr = SafeDictWrapper(kw)
 
     @classmethod
-    def build(cls, *args):
-        try:
-            obj = cls(*args)
-            return obj
-        except Exception, ex:
-            LOG.exception(ex)
-            return False
+    def set_header(cls, packed, header):
+        p = msgpack.Unpacker()
+        p.feed(packed)
+        data = []
+        while True:
+            try:
+                hdr = p.unpack()
+                hdr.update(header)
+                data.append(msgpack.packb(hdr))
+                p.skip(lambda p: data.append(p))
+            except msgpack.OutOfData:
+                break
+        if len(data) % 2 == 1:
+            # Corrupted?
+            data.pop()
+        return ''.join(data)
 
     @classmethod
-    def unpack(cls, pack):
-        args = msgpack.unpackb(pack)
-        return M.build(*args)
+    def pop_header(cls, packed):
+        p = msgpack.Unpacker()
+        p.feed(packed)
+        plain_data = ''
+        hdr = SafeDictWrapper()
+        while True:
+            try:
+                clean_hdr = p.unpack()
+                data = []
+                for k in ['ident', 'peer', 'org']:
+                    hdr[k] = clean_hdr.pop(k, '')
+                p.skip(lambda p: data.append(p))
+                plain_data = msgpack.packb(clean_hdr) + data[0]
+            except msgpack.OutOfData:
+                break
+        return hdr, plain_data
+
+    @classmethod
+    def parse(cls, packed):
+        p = msgpack.Unpacker()
+        p.feed(packed)
+        msgs = []
+        while True:
+            try:
+                hdr = p.unpack()
+                data = []
+                p.skip(lambda p: data.append(p))
+                obj = MsgWrapper(hdr, data[0])
+                obj.hdr = SafeDictWrapper(hdr)
+                msgs.append(obj)
+            except msgpack.OutOfData:
+                break
+            except Exception, ex:
+                LOG.exception(ex)
+                LOG.error(packed)
+                break
+        return msgs
+
+    @classmethod
+    def build(cls, packed):
+        try:
+            p = msgpack.Unpacker()
+            p.feed(packed)
+            hdr = p.unpack()
+            kwargs = p.unpack()
+            obj = cls(**kwargs)
+            obj.hdr = SafeDictWrapper(hdr)
+            return obj
+        except msgpack.OutOfData:
+            LOG.error("Corrupted packet %s" % packed)
+            return False
+
+
+class MsgWrapper(object):
+
+    def __init__(self, header, packed):
+        self.hdr = SafeDictWrapper(header)
+        self.packed = packed
+
+    def __repr__(self):
+        return self._
+
+    def pack(self):
+        return msgpack.packb(self.hdr) + self.packed
+
+    _ = property(pack)
+
+    def route(self):
+        return [getattr(self.hdr, 'dest'), self.pack()]
 
 
 class Dispatch(M):
 
     dest = ''
-    fields = ["user", "roles", "data", "libraries"]
+    fields = ["user", "roles", "data", "includes"]
+
+
+class GetNodes(M):
+
+    dest = ''
+    fields = ["org"]
+
+
+class Nodes(M):
+
+    dest = ''
+    fields = ["nodes"]
+
+
+class Queued(M):
+
+    dest = ''
+    fields = ["job_id"]
+
+
+class Error(M):
+
+    dest = ''
+    fields = ["msg", "code"]
 
 
 class ScheduleReq(M):
@@ -167,61 +295,9 @@ class ScheduleReq(M):
         return [self.control, self.job_id]
 
 
-class HeartBeatReq(M):
+class Fwd(M):
 
-    """
-    \x00k\x01, node_id, Org, ACTION
-    """
-
-    def __init__(self, ident, peer, org, control, *args):
-        self.ident = ident
-        self.peer = peer
-        self.org = org
-        self.control = control
-
-
-class FwdReq(M):
-
-    """
-    ident, data_packet
-    """
-
-    def __init__(self, ident, datagram, *args):
-        self.ident = ident
-        self.data = msgpack.packb(datagram)
-
-
-class ClientReq(M):
-
-    fields = ['ident', 'peer', 'org', 'data', 'extra']
-
-    def mod_data(self, val):
-        if val:
-            self.data = msgpack.unpackb(val)
-        return val
-
-    mod_extra = mod_data
-
-
-class RerouteReq(M):
-
-    fields = ['dest', 'ident', 'org', 'peer', 'control', 'data', 'extra']
-
-
-class ControlReq(M):
-
-    def __init__(self, ident, peer, org, control, node, data=None, extra=None):
-        self.ident = ident
-        self.peer = peer
-        self.org = org
-        self.control = control
-        self.node = node
-        self.data = None
-        self.extra = None
-        if data:
-            self.data = data
-        if extra:
-            self.extra = extra
+    fields = ['fwd_data']
 
 
 class Ident(M):
@@ -255,13 +331,12 @@ class HBR(M):
 
 
 class Init(M):
-    dest = 'INIT'
     fields = ['org_id', 'org_name', 'session_key', 'session_iv']
 
 
 class Quit(M):
-    dest = ''
-    fields = []
+    dest = HEARTBEAT
+    fields = ['peer']
 
 
 class Term(M):
@@ -276,268 +351,74 @@ class Crypto(M):
     dest = ''
     fields = ['message']
 
+
+class JobTarget(M):
+    dest = ''
+    fields = ['job_id', 'targets']
+
 # Replies
 
 
-class RegisterRep(M):
-
-    def __init__(self, frames):
-        self.reply = frames[0]
-        if len(frames) >= 1:
-            self.data = frames[1]
-        else:
-            self.data = ''
+class Control(M):
+    dest = ADMIN_TOWER
+    fields = ['action', 'node', 'data']
 
 
-class ClientRep(M):
-
-    def __init__(self, ident, peer, dest, control, *args):
-        self.ident = ident
-        self.peer = peer
-        self.dest = dest
-        self.control = control
-        if args:
-            self.data = args[0]
-            self.extra = args[1:]
-        else:
-            self.data = ''
-            self.extra = None
-
-    def pack(self):
-        if self.extra:
-            return [self.ident, msgpack.packb([self.dest, self.control,
-                                               self.data, self.extra])]
-        else:
-            return [self.ident,
-                    msgpack.packb([self.dest, self.control, self.data])]
-
-
-class JobRep(M):
-    fields = ['ident', 'peer', 'org', 'msg']
-
-    @property
-    def reply(self):
-        return M.build(*msgpack.unpackb(self.msg))
+class Register(M):
+    fields = ['node', 'status', 'message']
 
 
 class StdOut(M):
-    fields = ['job_id', 'run_as', 'output']
+    fields = ['dest', 'job_id', 'run_as', 'output']
 
 
 class StdErr(M):
-    fields = ['job_id', 'run_as', 'stderr']
+    fields = ['dest', 'job_id', 'run_as', 'output']
 
 
 class Finished(M):
-    fields = ['run_as', 'stdout', 'stderr', 'env', 'ret_code']
+    fields = ['dest', 'job_id', 'run_as', 'result']
 
 
 class Events(M):
-    fields = ['run_as', 'result']
+    fields = ['dest', 'job_id', 'run_as', 'result']
 
 
 class Job(M):
-    fields = ['dest', 'remote_user', 'request']
+    fields = ['job_id', 'remote_user', 'request']
 
 
 class LocalJobRep(M):
 
-    def __init__(self, job_id, peer, control, run_as=None, data=None, *args):
-        self.job_id = job_id
-        self.peer = peer
-        self.control = control
-
-        self.run_as = run_as
-        try:
-            self.data = msgpack.unpackb(data)
-        except:
-            self.data = None
-        if args:
-            self.extra = list(args)
-
-
-class JobInput(M):
-
-    def __init__(self, _, cmd, job_id, user, org,
-                 data=None, targets=None, *args):
-        self.cmd = cmd
-        self.job_id = job_id
-        self.user = user
-        self.org = org
-        self.data = data
-        self.targets = targets
-
+    fields = ['dest', 'job_id', 'peer', 'control', 'run_as', 'data']
 
 # Node
+
 
 class Ready(M):
     run_as = ''
     fields = ['dest', 'status']
 
-# Frames
-
-
-class Frame(object):
-
-    def __init__(self, ident, peer, org, msg):
-        self.ident = ident
-        self.peer = peer
-        self.org = org
-        self.msg = msg
-
-    def __repr__(self):
-        return str(vars(self))
-
-    @property
-    def message(self):
-        if not hasattr(self, '_m'):
-            try:
-                self._m = M.build(*msgpack.unpackb(self.msg))
-            except Exception, ex:
-                print ex
-                return None
-        return self._m
-
-    @property
-    def _(self):
-        return [self.ident, self.peer, self.org, self.msg]
-
-    def reroute(self):
-        if not self.message:
-            raise Exception("Frame message is None")
-        return [self.message.dest, self.ident, self.peer, self.org, self.msg]
-
-    def reply(self, msg):
-        return [self.ident, msg._]
-
-F = Frame
-
-
-class ReplyFrame(object):
-
-    def __init__(self, ident, msg):
-        self.ident = ident
-        self.msg = msg
-
-    def __repr__(self):
-        return str(vars(self))
-
-    @property
-    def message(self):
-        if not hasattr(self, '_m'):
-            try:
-                self._m = M.build(*msgpack.unpackb(self.msg))
-            except Exception, ex:
-                print ex
-                return None
-        return self._m
-
-    @property
-    def _(self):
-        return [self.ident, self.msg]
-
-R = ReplyFrame
-
-
-class RouterFrame(object):
-
-    def __init__(self, *args):
-        _m = M.build(*args)
-        self.dest = _m.dest
-        self.msg = _m.pack()
-
-    def __repr__(self):
-        return str(vars(self))
-
-    @property
-    def _(self):
-        return [self.dest, self.msg]
-
-RT = RouterFrame
-
 # Transport
 
 
-class TransportMessage(object):
-    __metaclass__ = abc.ABCMeta
-
-    pack_order = []
-    unpack_functions = {}
-    _seq_no = 0
-
-    def default_packer(self, val):
-        return stringify1(val)
-
-    def pack(self):
-        # reply: 'PIPE', job_id, run_as, node_id, stdout, stderr
-        # reply-fwd: session_id, PIPEOUT, session_id, time,
-        #   task_name, user, targets, tags, job_id, run_as,
-        #   node_id, stdout, stderr
-
-        return dict([(k, getattr(self, k, None)) for k in self.pack_order])
-
-    @property
-    def seq_no(self):
-        return self._seq_no
-
-    @seq_no.setter
-    def seq_no(self, seq_no):
-        self._seq_no = seq_no
-
-    @classmethod
-    def unpack(cls, status, timestamp, *args):
-        """ Build the proper message from frames+
-        """
-        target_klass = None
-
-        for klass in cls.__subclasses__():
-            if klass.status == status:
-                target_klass = klass
-
-        if target_klass is None:
-            return None
-
-        inst = target_klass()
-        for idx, field_name in enumerate(target_klass.pack_order):
-            val = args[idx]
-            unpack_function = target_klass.unpack_functions.get(field_name,
-                                                                lambda x: x)
-            setattr(inst, field_name, unpack_function(val))
-
-        return inst
-
-
-class InitialMessage(TransportMessage):
+class InitialMessage(M):
     status = StatusCodes.STARTED
-    pack_order = ["type", "session_id",
-                  "ts", "org", "seq_no", "step_id"]
-
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            if k in self.pack_order:
-                setattr(self, k, v)
-        self.type = "INITIAL"
+    type = "INITIAL"
+    fields = ["type", "session_id", "ts", "org", "seq_no", "step_id"]
 
 
-class PipeMessage(TransportMessage):
+class PipeMessage(M):
     status = StatusCodes.PIPEOUT
-    pack_order = ["type", "session_id", "ts", "seq_no", "org", "step_id",
-                  "user", "job_id", "run_as", "node", "stdout", "stderr"]
+    fields = ["type", "session_id", "ts", "seq_no", "org", "step_id",
+              "user", "job_id", "run_as", "node", "stdout", "stderr"]
 
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            if k in self.pack_order:
-                setattr(self, k, v)
-        self.type = "PARTIAL"
+    type = "PARTIAL"
 
 
-class FinishedMessage(TransportMessage):
+class FinishedMessage(M):
     status = StatusCodes.FINISHED
-    pack_order = ["type", "session_id", "ts", "seq_no",
-                  "user", "org", "step_id", "result"]
+    fields = ["type", "session_id", "ts", "seq_no",
+              "user", "org", "step_id", "result", "env"]
 
-    def __init__(self, **kwargs):
-        for k, v in kwargs.items():
-            if k in self.pack_order:
-                setattr(self, k, v)
-        self.type = "FINISHED"
+    type = "FINISHED"

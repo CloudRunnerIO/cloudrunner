@@ -139,7 +139,7 @@ class ListPending(ListNodes):
 
 class LibWorkflows(object):
     method = "get"
-    path = "library:workflows"
+    path = "repository:workflows"
 
     def __init__(self, initial, **kwargs):
         self.initial = {}
@@ -164,7 +164,7 @@ class LibWorkflows(object):
 
 class LibInlines(object):
     method = "get"
-    path = "library:inlines"
+    path = "repository:inlines"
 
     def __init__(self, initial, **kwargs):
         self.initial = {}
@@ -189,7 +189,7 @@ class LibInlines(object):
 
 class GetWorkflow(object):
     method = "get"
-    path = "library:workflows"
+    path = "repository:workflows"
 
     def __init__(self, initial, wf_id=None, store=None, **kwargs):
         self.initial = {}
@@ -218,7 +218,7 @@ class GetWorkflow(object):
 
 class GetInline(object):
     method = "get"
-    path = "library:inlines"
+    path = "repository:inlines"
 
     def __init__(self, initial, inl_id=None, store=None, **kwargs):
         self.initial = {}

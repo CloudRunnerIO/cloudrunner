@@ -258,7 +258,7 @@ class MsgWrapper(object):
 class Dispatch(M):
 
     dest = ''
-    fields = ["user", "roles", "data", "includes"]
+    fields = ["user", "roles", "tasks", "includes", "attachments"]
 
 
 class GetNodes(M):
@@ -276,7 +276,7 @@ class Nodes(M):
 class Queued(M):
 
     dest = ''
-    fields = ["job_id"]
+    fields = ["task_ids"]
 
 
 class Error(M):
@@ -405,13 +405,13 @@ class Ready(M):
 class InitialMessage(M):
     status = StatusCodes.STARTED
     type = "INITIAL"
-    fields = ["type", "session_id", "ts", "org", "seq_no", "step_id"]
+    fields = ["type", "session_id", "ts", "org", "seq_no"]
 
 
 class PipeMessage(M):
     status = StatusCodes.PIPEOUT
-    fields = ["type", "session_id", "ts", "seq_no", "org", "step_id",
-              "user", "job_id", "run_as", "node", "stdout", "stderr"]
+    fields = ["type", "session_id", "ts", "seq_no", "org",
+              "user", "run_as", "node", "stdout", "stderr"]
 
     type = "PARTIAL"
 
@@ -419,6 +419,6 @@ class PipeMessage(M):
 class FinishedMessage(M):
     status = StatusCodes.FINISHED
     fields = ["type", "session_id", "ts", "seq_no",
-              "user", "org", "step_id", "result", "env"]
+              "user", "org", "result", "env"]
 
     type = "FINISHED"

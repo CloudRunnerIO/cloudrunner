@@ -93,7 +93,7 @@ class Daemon(object):
     def delpid(self):
         os.remove(self.pidfile)
 
-    def start(self):
+    def start(self, *args, **kwargs):
         """
         Start the daemon
         """
@@ -114,7 +114,7 @@ class Daemon(object):
         self.daemonize()
 
         try:
-            self.run()
+            self.run(*args, **kwargs)
         except Exception, ex:
             sys.stdout.write('run Failed : %r' % ex)
 

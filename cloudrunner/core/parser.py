@@ -95,6 +95,9 @@ class Args(object):
     def get(self, k, default=None):
         return self._items.get(k, default)
 
+    def __getattr__(self, k, default=None):
+        return self._items.get(k, default)
+
     def __contains__(self, k):
         return k in self._items
 
@@ -107,12 +110,31 @@ class Section(object):
     def __init__(self):
         self.timeout = None
         self.args = []
+        self.args_string = ''
         self.header = ""
         self.body = ""
+        self.lang = ""
+        self.target = ''
 
     @property
     def script(self):
         return "%s\n%s" % (self.header, self.body)
+
+    def update_targets(self, env):
+        params = has_params(self.target)
+        if params:
+            for sel_param in params:
+                sel, param = sel_param
+                param_name = param.replace('$', '')
+                if param_name in env:
+                    param_val = env[param_name]
+                    if isinstance(param_val, list):
+                        repl_params = ' '.join(
+                            ['%s%s' % (sel, val) for val in param_val])
+                    else:
+                        repl_params = sel + param_val
+                    self.target = self.target.replace(
+                        sel + param, repl_params)
 
 
 def parse_sections(document):
@@ -124,10 +146,12 @@ def parse_sections(document):
             section = Section()
             section.header = strings[i]
             section.body = strings[i + 1]
+            section.lang = parse_lang(strings[i + 1])
             sections.append(section)
             target, args = parse_selectors(section.header)
             section.target = target
             section.args = Args(*shlex.split(args))
+            section.args_string = args
         return sections
     except Exception, exc:
         LOG.error(exc)

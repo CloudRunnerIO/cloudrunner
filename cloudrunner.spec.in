@@ -6,7 +6,7 @@
 
 
 Name:       cloudrunner
-Version:    0.5
+Version:    1.0
 Release:    4.cloudr%{?dist}
 Summary:    CloudRunner engine for running scripts in cloud environment
 Group:      Cloud tools

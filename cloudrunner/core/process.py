@@ -21,9 +21,7 @@ import copy
 import logging
 import os
 import shutil
-import stat
 import tempfile
-import threading
 import uuid
 
 SHEBANG = {
@@ -42,7 +40,6 @@ COMMENT_SYMBOL = {
 }
 
 import cloudrunner
-from cloudrunner.core.message import StatusCodes
 from cloudrunner.core.statemanager import StateManager
 from cloudrunner.core import parser
 from cloudrunner.util.string import stringify, stringify1, jsonify1
@@ -124,7 +121,6 @@ class Processor(object):
                                                           suffix=suffix,
                                                           text=True)
 
-
         os.write(exec_file_fd, command)
         os.close(exec_file_fd)
 
@@ -155,6 +151,9 @@ class Processor(object):
                                         self.session_cwd,
                                         initial_env)
             yield popen
+        except OSError, oserr:
+            LOG.exception(oserr)
+            stderr += '%r' % oserr
         except Exception, ex:
             LOG.exception(ex)
             stderr += '%r' % ex

@@ -17,7 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import json
+import msgpack
 import logging
 from socket import gethostbyname
 from threading import Thread
@@ -26,6 +26,7 @@ import zmq
 import uuid
 
 from cloudrunner.core import parser
+from cloudrunner.core.exceptions import ConnectionError
 from cloudrunner.core.message import StatusCodes
 from cloudrunner.core.message import LocalJobRep
 from cloudrunner.core.message import PipeMessage
@@ -118,11 +119,8 @@ class Session(Thread):
 
             fin_msg = FinishedMessage(
                 session_id=self.session_id,
-                task_name='',
                 user='',
                 org='',
-                tags='',
-                script=self.script,
                 response=response,
             )
 
@@ -137,7 +135,6 @@ class Session(Thread):
     def execute_step(self, env, targets, targets_uris, script, libs):
         # 2 sec default
         job_id = uuid.uuid4().hex
-        #discovery_time = float(self.config.discovery_time or 1)
         start_time = time.time()
         end_discovery_time = start_time + 3
         node_map = {}
@@ -189,18 +186,19 @@ class Session(Thread):
                     for (tgt, host) in hosts:
                         self.worker_sock.send_multipart([
                             tgt, host, 'REQ', self.session_id,
-                            "JOB", json.dumps(['@', request])])
+                            "JOB", msgpack.packb(['@', request])])
                     continue
                 # else:
                 #    self.reply_sock.send_multipart(list(frames))
                 job_rep = LocalJobRep.build(*frames)
-                state = node_map.setdefault(job_rep.peer,
-                                            dict(
-                                                status=StatusCodes.STARTED,
-                                            data={},
-                                            remote_user=job_rep.run_as,
-                                            stdout='',
-                                            stderr=''))
+                state = node_map.setdefault(
+                    job_rep.peer,
+                    dict(
+                        status=StatusCodes.STARTED,
+                        data={},
+                        remote_user=job_rep.run_as,
+                        stdout='',
+                        stderr=''))
                 if job_rep.data:
                     state['data'].update(job_rep.data)
 
@@ -228,19 +226,16 @@ class Session(Thread):
 
                 else:
                     # node_map[peer][stdout] =
-                    outputs = json.loads(frames[4])
+                    outputs = msgpack.unpackb(frames[4])
                     outputs.setdefault('stdout', "")
                     outputs.setdefault('stderr', "")
 
                     pipe_msg = PipeMessage(
                         session_id=self.session_id,
-                        task_name='',
                         user=job_rep.run_as,
                         org='',
-                        targets=targets,
-                        tags='',
                         job_id=job_rep.job_id,
-                        run_as=job.run_as,
+                        run_as=job_rep.run_as,
                         node=job_rep.peer,
                         stdout=outputs['stdout'],
                         stderr=outputs['stderr']
@@ -249,9 +244,9 @@ class Session(Thread):
                         pipe_msg.pack(self.session_id))
         except zmq.ZMQError, zerr:
             if not self.run_event.is_set():
-                if self.ctx.closed or \
-                    zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
-                    or zerr.errno == zmq.ENOTSOCK:
+                if (self.ctx.closed or zerr.errno == zmq.ETERM or
+                        zerr.errno == zmq.ENOTSUP or
+                        zerr.errno == zmq.ENOTSOCK):
                     # System interrupt
                     raise ConnectionError()
         except Exception, ex:

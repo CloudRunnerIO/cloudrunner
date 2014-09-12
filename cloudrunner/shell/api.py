@@ -18,7 +18,7 @@
 #    under the License.
 
 import logging
-import json
+import msgpack
 import os
 import sys
 from cloudrunner.core import message, parser
@@ -39,19 +39,31 @@ class AsyncResp(object):
 
     def iter(self, timeout=5):
         while not self.ready:
-            msg = self.get_message(timeout=timeout)
-            if msg:
-                LOG.debug("Received message: %s", msg.status)
-            if msg and msg.status == message.StatusCodes.FINISHED:
-                self.ready = True
-            if msg:
-                yield msg
+            try:
+                frames = self.queue.recv(timeout)
+                if frames:
+                    msg = None
+                    try:
+                        msg = message.TransportMessage.unpack(*frames)
+                        LOG.debug("Received message: %s", vars(msg))
+                    except:
+                        LOG.error("Received frames: %r", frames)
+                    if msg:
+                        yield msg
+                    else:
+                        LOG.error("Received frames: %r", frames)
+                    if msg and msg.status == message.StatusCodes.FINISHED:
+                        break
+                else:
+                    yield "Empty/wrong response from server"
+                    return
+            except Exception, ex:
+                LOG.exception(ex)
+                yield str(ex)
+                return
 
-    def get_message(self, timeout=None):
-        frames = self.queue.recv(timeout)
-        LOG.debug("Received frames: %r", frames)
-        if frames:
-            return message.TransportMessage.unpack(*frames)
+    def __iter__(self):
+        return self.iter()
 
 
 class AsyncRespLocal(object):
@@ -82,11 +94,9 @@ class AsyncRespLocal(object):
 
                         yield message.PipeMessage(
                             session_id="",
-                            task_name="",
+                            step_id=1,
                             user=proc.run_as,
                             org='',
-                            targets="local",
-                            tags='',
                             job_id='local',
                             run_as=proc.run_as,
                             node='localhost',
@@ -107,7 +117,7 @@ class CloudRunner(object):
     DEFAULT_TIMEOUT = 60
 
     default_transport = 'cloudrunner.plugins.transport.' \
-        'zmq_transport.ZmqCliTransport'
+        'rest_transport.RESTTransport'
     plugins = {}
 
     def __init__(self, transport, plugins=None,
@@ -163,7 +173,7 @@ class CloudRunner(object):
         req.append(session_id=session_id)
         req.append(job_id=job_id)
 
-        self.queue.send(*req.pack())
+        self.queue.send(*req.pack(), **req.kwargs)
 
         if not to_read:
             return
@@ -176,7 +186,7 @@ class CloudRunner(object):
         status, r = resp
 
         if len(r) != 2:
-            raise Exception('Error: {}'.format(r[0]))
+            raise Exception('Error: %s' % r[0])
         return r[1]
 
     def terminate(self, session_id, sig="term", to_read=True):
@@ -186,7 +196,7 @@ class CloudRunner(object):
         req.append(session_id=session_id)
         req.append(action=sig)
 
-        self.queue.send(*req.pack())
+        self.queue.send(*req.pack(), **req.kwargs)
 
         if not to_read:
             return
@@ -197,7 +207,7 @@ class CloudRunner(object):
         if len(r) != 2:
             raise Exception('Error: {}'.format(r[0]))
 
-        return json.loads(resp)
+        return msgpack.unpackb(resp)
 
     def run_local(self, script_content):
         from cloudrunner.core.process import Processor
@@ -241,7 +251,7 @@ class CloudRunner(object):
 
         req.append(timeout=self.request_timeout)
 
-        self.queue.send(*req.pack())
+        self.queue.send(*req.pack(), **req.kwargs)
         return AsyncResp(self, self.queue)
 
     def attach(self, session_id, targets):
@@ -249,12 +259,12 @@ class CloudRunner(object):
         req.append(control='attach')
 
         req.append(session_id=session_id)
-        req.append(data=json.dumps(targets))
+        req.append(data=msgpack.packb(targets))
 
         # we do not know the original timeout,
         self.timeout = sys.maxint / 1000
 
-        self.queue.send(*req.pack())
+        self.queue.send(*req.pack(), **req.kwargs)
         r = self.queue.recv(timeout=5)
         status, resp = r
 
@@ -267,15 +277,9 @@ class CloudRunner(object):
         req = self.build_request()
         req.append(control=command)
 
-        self.queue.send(*req.pack())
-        status, resp = self.queue.recv(timeout=5)
-        if status == "ERR":
-            raise Exception("Error getting nodes on Master: {}".format(resp))
-
-        result = json.loads(resp)
-        if not result[0]:
-            raise Exception("Error getting nodes on Master: {}".format(result))
-        return result[1]
+        self.queue.send(*req.pack(), **req.kwargs)
+        resp = self.queue.recv(timeout=5)
+        return resp
 
     def list_active_nodes(self):
         return self._list_nodes_get('list_active_nodes')
@@ -286,50 +290,71 @@ class CloudRunner(object):
     def list_pending_nodes(self):
         return self._list_nodes_get('list_pending_nodes')
 
+    def _get_workflows(self):
+        req = self.build_request()
+        req.append(control="workflows")
+
+        self.queue.send(*req.pack())
+        wfs = self.queue.recv(timeout=5)
+        return wfs
+
+    def _get_inlines(self):
+        req = self.build_request()
+        req.append(control="inlines")
+
+        self.queue.send(*req.pack())
+        inls = self.queue.recv(timeout=5)
+        return inls
+
+    def show_workflow(self, store, wf_id):
+        req = self.build_request()
+        req.append(control="workflow")
+        req.append(store=store)
+        req.append(wf_id=wf_id)
+
+        self.queue.send(*req.pack(), **req.kwargs)
+        wf = self.queue.recv(timeout=5)
+        return wf
+
+    def show_inline(self, inl_id):
+        req = self.build_request()
+        req.append(control="inline")
+        req.append(inl_id=inl_id)
+
+        self.queue.send(*req.pack(), **req.kwargs)
+        inl = self.queue.recv(timeout=5)
+        return inl
+
     @property
     def library(self):
         if hasattr(self, "_library"):
             return self._library
-        _library = {}
+        _library = {"workflows": {}, "inlines": {}}
 
         if self.transport.mode != "server":
             return _library
 
         try:
-            success, result = self.get_plugin("library",
-                                              args=["list", "--json"])[0]
-            if success:
+            try:
+                result = self._get_workflows()
                 for store_name, items in result.items():
                     for item in items:
                         item_name = "[%s]://%s" % (store_name, item['name'])
                         item_path = item['name']
-                        _library[item_name] = item_path
-                self._library = _library
+                        _library['workflows'][item_name] = item_path
+            except Exception, ex:
+                print ex
+            try:
+                result = self._get_inlines()
+                for item in result:
+                    item_name = "[%s]://%s" % ("library", item['name'])
+                    item_path = item['name']
+                    _library['inlines'][item_name] = item_path
+            except Exception, ex:
+                print ex
+
+            self._library = _library
         except:
             pass
 
         return _library
-
-    def get_plugin(self, controller, data=None, args=None):
-        req = self.build_request()
-        req.append(plugin=controller)
-        req.append(control='plugin', data=data)
-        req.append(args='"' + '" "'.join(args) + '"')
-
-        self.queue.send(*req.pack())
-        resp = self.queue.recv()
-        if len(resp) > 1:
-            return json.loads(resp[1])
-        else:
-            return {}
-
-    def list_plugins(self):
-        req = self.build_request()
-        req.append(control='plugins')
-
-        self.queue.send(*req.pack())
-        success, result = self.queue.recv()
-        if success and len(result) > 0:
-            return json.loads(result)
-        else:
-            return []

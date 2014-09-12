@@ -17,7 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import json
+import msgpack
 import logging
 import M2Crypto as m
 from StringIO import StringIO
@@ -25,7 +25,7 @@ import threading
 import time
 import zmq
 
-from cloudrunner.util.string import jsonify
+from cloudrunner.core.message import M, Quit
 
 LOGS = logging.getLogger('TLSZmq Server')
 LOGC = logging.getLogger('TLSZmq Client')
@@ -54,9 +54,10 @@ class TLSZmqServerSocket(object):
 
         socket      --  Zmq socket to wrap.
 
-        proc_socket_uri  --  Zmq socket to send/recv packets for internal processing.
+        proc_socket_uri  --  Zmq socket to send/recv packets
+                    for internal processing.
 
-        cert        --  Server certificate - PEM-encoded file (e.g. server.crt).
+        cert        --  Server certificate - PEM-encoded file (eg. server.crt)
 
         key         --  Server key - PEM-encoded file(e.g. server.key).
 
@@ -85,6 +86,20 @@ class TLSZmqServerSocket(object):
         self.conns = {}
         self.verify_func = verify_func
 
+    def _update_conn(self, ident, x509):
+        if x509 and x509.get_serial_number() not in self.CRL:
+            # auth conn
+            subj = x509.get_subject()
+            client_id = subj.CN
+            org_id = subj.O
+            self.conns[ident].node = client_id
+            self.conns[ident].org = org_id
+            return client_id, org_id
+        else:
+            self.conns[ident].node = None
+            # self.conns[ident].org = None
+            return None, None
+
     def start(self):
 
         class Conn(object):
@@ -108,7 +123,7 @@ class TLSZmqServerSocket(object):
 
         def prepare_res(ident, node, org, resp):
             if self.route_packets:
-                packets = list(jsonify(*json.loads(resp)))
+                packets = list(*msgpack.unpackb(resp))
                 packets.insert(1, ident)
                 return packets  # [ident, resp]
             else:
@@ -141,7 +156,9 @@ class TLSZmqServerSocket(object):
                         frames = proc_socket.recv_multipart()
                         if self.route_packets:
                             frames.pop(0)
-                        queue.append((2, frames[0], frames[1]))
+                        plain_data = frames[0]
+                        hdr, plain_data = M.pop_header(plain_data)
+                        queue.append((2, hdr.ident, plain_data))
 
                 if queue and not enc_req and not data:
                     _type, ident, val = queue.pop(0)
@@ -156,11 +173,13 @@ class TLSZmqServerSocket(object):
                 if enc_req == '-255':
                     # Remove me
                     if ident in self.conns:
-                        LOGS.debug('Removing %s from cache' % repr(ident))
                         conn = self.conns.pop(ident)
-                        proc_socket.send_multipart(
-                            prepare_res(ident, conn.node or '', conn.org or '',
-                                        json.dumps(["QUIT"])))
+                        LOGS.debug('Removing %s from cache' % vars(conn))
+                        m = Quit(conn.node)
+                        m.hdr.ident = ident
+                        m.hdr.peer = conn.node or ''
+                        m.hdr.org = conn.org or ''
+                        proc_socket.send(m._)
                         conn.conn.shutdown()
                         continue
 
@@ -191,17 +210,7 @@ class TLSZmqServerSocket(object):
                     try:
                         if self.verify_func:
                             x509 = tls.ssl.get_peer_cert()
-                            if x509 and \
-                                x509.get_serial_number() not in self.CRL:
-                                # auth conn
-                                subj = x509.get_subject()
-                                client_id = subj.CN
-                                org_id = subj.O
-                                self.conns[ident].node = client_id
-                                self.conns[ident].org = org_id
-                            else:
-                                self.conns[ident].node = None
-                                self.conns[ident].org = None
+                            client_id, org_id = self._update_conn(ident, x509)
                         else:
                             self.conns[ident].node = None
                             self.conns[ident].org = None
@@ -211,24 +220,31 @@ class TLSZmqServerSocket(object):
                         self.conns[ident].org = None
                         LOGS.exception(ex)
 
-                    LOGS.debug("GOT DATA: %s" % [repr(ident), plain_data])
+                    LOGS.debug("GOT DATA: %s" % [repr(ident),
+                                                 client_id,
+                                                 org_id,
+                                                 plain_data])
 
-                    packets = plain_data.split('\x00')
-                    for packet in packets:
-                        if packet:
-                            proc_socket.send_multipart(
-                                prepare_res(ident, client_id, org_id or '',
-                                            packet))
+                    header = dict(ident=ident,
+                                  peer=client_id,
+                                  org=org_id or '')
+                    try:
+                        plain_data = M.set_header(plain_data, header)
+                        LOGS.debug("Repacked msg: %r" % plain_data)
+                        proc_socket.send(plain_data)
+                    except Exception, ex:
+                        LOGS.exception(ex)
 
                 if data:
+                    LOGS.debug("Sending SSL DATA: %s" % data)
                     tls.send(data)
-                    #LOGS.debug("SENDING DATA: %s" % [repr(ident), data])
+                    # LOGS.debug("SENDING DATA: %s" % [repr(ident), data])
                     try:
                         flushed = tls.update()
                         if self.verify_func and flushed and \
-                            not self.conns[ident].node:
-                            LOGS.info("Anon connection, dropping %s" %
-                                      repr(ident))
+                                not self.conns[ident].node:
+                            LOGS.debug("Anon connection, dropping %s" %
+                                       repr(ident))
                             # Remove cached ssl obj for unauth reqs
                             conn = self.conns.pop(ident)
                             conn.conn.shutdown()
@@ -240,7 +256,7 @@ class TLSZmqServerSocket(object):
                     self.zmq_socket.send_multipart([ident, enc_rep])
             except zmq.ZMQError, zerr:
                 if zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
-                    or zerr.errno == zmq.ENOTSOCK:
+                        or zerr.errno == zmq.ENOTSOCK:
                     # System interrupt
                     break
             except KeyboardInterrupt:
@@ -279,7 +295,7 @@ class TLSZmqClientSocket(object):
 
         stopped_event   --  Event to listen to
 
-        cert        --  Server certificate - PEM-encoded file (e.g. client.crt).
+        cert        --  Server certificate - PEM-encoded file (eg. client.crt)
 
         key         --  Server key - PEM-encoded file(e.g. client.key).
 
@@ -342,13 +358,17 @@ class TLSZmqClientSocket(object):
         self.init.set()
 
     def recv_from_worker(self):
-        return self.socket_proc.recv_multipart()
+        if self.route_packets:
+            return self.socket_proc.recv_multipart()[1]
+        else:
+            return self.socket_proc.recv()
 
     def start(self):
         if self.route_packets:
             self.socket_proc = self.context.socket(zmq.ROUTER)
         else:
             self.socket_proc = self.context.socket(zmq.DEALER)
+            self.socket_proc.setsockopt(zmq.IDENTITY, 'SSL_PROXY')
         if self.bind_socket:
             self.socket_proc.bind(self.socket_proc_uri)
         else:
@@ -361,16 +381,14 @@ class TLSZmqClientSocket(object):
         retry_count = 5
         while not self.stopped.is_set() and retry_count:
             try:
-                socks = dict(self.poller.poll(1))
+                socks = dict(self.poller.poll(1000))
 
                 if self.socket_proc in socks:
                     data = self.recv_from_worker()
-                    if self.route_packets:
-                        data.pop(0)  # sender
-                    LOGC.debug("Data to send %s" % data[:2])
+                    LOGC.debug("Data to send %r" % data)
 
-                    self.tls.send(json.dumps(data))
-                    self.tls.send('\x00')  # separator
+                    self.tls.send(data)
+                    # self.tls.send('\x00')  # separator
                     self.tls.update()
 
                 if not self.init.is_set():
@@ -392,25 +410,26 @@ class TLSZmqClientSocket(object):
                         retry_count -= 1
                         LOGC.warn("Retries left: %s" % retry_count)
                         self.renew()
-                        self.tls.send(json.dumps(data))
+                        self.tls.send(data)
                         self.tls.update()
                     except Exception, ex:
                         LOGC.exception(ex)
                         break
 
                 if self.tls.can_recv():
-                    resp_json = self.tls.recv()
+                    packed = self.tls.recv()
+                    LOGC.debug("Data recvd %r" % packed)
                     retry_count = 5
                     if self.validate_peer:
                         x509 = self.tls.ssl.get_peer_cert()
                         if not self.validate_peer(x509):
                             continue
                     try:
-                        resp = json.loads(resp_json)
-                        LOGC.debug("Data recvd %s" % resp)
-                        self.socket_proc.send_multipart(list(jsonify(*resp)))
+                        self.socket_proc.send(packed)
                     except ValueError:
-                        LOGC.error("Cannot decode message %s" % resp_json)
+                        LOGC.error("Cannot decode message %s" % packed)
+                    except Exception, ex:
+                        LOGC.error("Error %r" % ex)
 
             except ConnectionException, connex:
                 LOGC.error(connex)
@@ -419,7 +438,7 @@ class TLSZmqClientSocket(object):
                 raise
             except zmq.ZMQError, zerr:
                 if zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
-                    or zerr.errno == zmq.ENOTSOCK:
+                        or zerr.errno == zmq.ENOTSOCK:
                     # System interrupt
                     break
                 LOGC.exception(zerr)
@@ -466,8 +485,8 @@ class _TLSZmq(object):
 
         type        --  Type of the instance - 'Server' or 'Client'
 
-        identity    --  unique id of the wrapper. Max length is 32 chars, due to
-                        limitation in OpenSSL. Needed for proper
+        identity    --  unique id of the wrapper. Max length is 32 chars,
+                        due to limitation in OpenSSL. Needed for proper
                         packet handling. Required.
 
         cert        --  Certificate file name. Used on both
@@ -533,7 +552,7 @@ class _TLSZmq(object):
     def _verify_callback(self, ctx, _x509, errnum, depth, ok):
         try:
             x509 = m.X509.X509(_x509)
-        except Exception, ex:
+        except Exception:
             return False
         if hasattr(self, 'verify_cb'):
             ok = self.verify_cb(x509, depth, ok)
@@ -721,8 +740,8 @@ class TLSZmqServer(_TLSZmq):
                         Valid values are: 'sslv3' or 'tlsv1'.
                         Required.
 
-        identity    --  unique id of the wrapper. Max length is 32 chars, due to
-                        limitation in OpenSSL. Needed for proper
+        identity    --  unique id of the wrapper. Max length is 32 chars,
+                        due to limitation in OpenSSL. Needed for proper
                         packet handling. Required.
 
         cert        --  Certificate file name. Mandatory.

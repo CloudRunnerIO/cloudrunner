@@ -17,7 +17,6 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from mock import Mock
 import logging
 import os
 import shutil
@@ -102,8 +101,8 @@ class BaseTestCase(TestCase):
                          "[%s] not found in [%s] " % (what, where))
 
     def assertType(self, obj, _type):
-        self.assertTrue(isinstance(obj, _type), "(%s) %s is not %s" %
-                       (obj, type(obj), _type))
+        self.assertTrue(isinstance(obj, _type),
+                        "(%s) %s is not %s" % (obj, type(obj), _type))
 
     def assertCount(self, _list, count):
         self.assertEqual(len(_list), count)

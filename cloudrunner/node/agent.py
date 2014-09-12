@@ -41,26 +41,19 @@ try:
 except ImportError:
     pass
 import argparse
-import argparse
-import json
+import msgpack
 import os
 import signal
-import socket
 from threading import Thread
 from threading import Event
-import time
-import sys
 
 from cloudrunner.core import parser
 from cloudrunner.core.exceptions import ConnectionError
-from cloudrunner.core.message import RegisterRep
-from cloudrunner.core.message import ADMIN_TOWER
-from cloudrunner.core.message import StatusCodes
+from cloudrunner.core.message import StatusCodes, Ready, Job, M, JobTarget
 from cloudrunner.core.process import Processor
 from cloudrunner.node.matcher import Matcher
 from cloudrunner.plugins.transport.base import TransportBackend
 from cloudrunner.util.daemon import Daemon
-from cloudrunner.util.loader import load_plugins
 from cloudrunner.util.loader import load_plugins_from
 from cloudrunner.util.shell import colors
 from cloudrunner.util.validator import validate_address
@@ -101,8 +94,9 @@ class AgentNode(Daemon):
                 break
 
         if not self.transport_class:
-            print colors.red("Cannot find transport class %s from module %s" %
-                            (klass, mod))
+            print colors.red(
+                "Cannot find transport class %s from module %s" % (klass,
+                                                                   mod))
             exit(1)
 
         assert self.transport_class
@@ -235,7 +229,8 @@ class AgentNode(Daemon):
             exit(1)
 
         def request_processor():
-            req_queue = self.backend.consume_queue('requests')
+            req_queue = self.backend.consume_queue('requests',
+                                                   ident="DISPATCHER")
             poller = self.backend.create_poller(req_queue)
             while not self.running.is_set():
                 try:
@@ -243,12 +238,16 @@ class AgentNode(Daemon):
                     if not ready:
                         continue
                     if req_queue in ready:
-                        message = req_queue.recv()
+                        message = req_queue.recv()[0]
                         if not message:
                             continue
-                        self.target_match(*message)
+                        job = JobTarget.build(message)
+                        if job:
+                            self.target_match(job)
                 except ConnectionError:
                     break
+                except Exception:
+                    continue
             req_queue.close()
 
         Thread(target=request_processor).start()
@@ -264,15 +263,6 @@ class AgentNode(Daemon):
         LOG.info("Exiting Node, current sessions: %s" % self.sessions)
         self.backend.terminate()
 
-    class Dispatcher(Thread):
-
-        def __init__(self, backend):
-            control_queue = backend.publish_queue('dispatcher')
-            super(AgentNode.Dispatcher, self).__init__()
-
-        def run(self):
-            pass
-
     class Session(Thread):
 
         def __init__(self, session_id, backend):
@@ -280,10 +270,10 @@ class AgentNode(Daemon):
             self.session_id = str(session_id)
             self.done = False
             self.backend = backend
-            self.queue = backend.publish_queue('jobs', ident=self.session_id)
-            self.queue.send(self.session_id, StatusCodes.READY)
-
             LOG.info("Creating session %s" % self.session_id)
+            self.queue = backend.publish_queue('jobs', ident=self.session_id)
+            ready_msg = Ready(self.session_id, StatusCodes.READY)
+            self.queue.send(ready_msg._)
 
         def _close(self):
             self.done = True
@@ -296,36 +286,38 @@ class AgentNode(Daemon):
             self._close()
 
         def _yield_reply(self, *reply):
-            LOG.debug("[%s] Yielding %s" % (self.session_id, reply[0]))
+            LOG.info("[%s] Yielding %s" % (self.session_id, reply))
             try:
-                self.queue.send(self.session_id, *list(reply))
+                frames = list(reply)
+                # Dest
+                frames.insert(1, self.session_id)
+                # JobId
+                frames.insert(1, self.session_id)
+                reply = M(*frames)
+                self.queue.send(reply._)
             except ConnectionError:
                 self._close()
 
         def run(self):
-            self.job_attr = self.queue.recv(2)
-            if not self.job_attr:
+            data = self.queue.recv(2)
+            if not data:
                 LOG.error("[%s] Timeout waiting for Job description" %
                           self.session_id)
                 self._close()
                 return
-            command = self.job_attr[0].lower()
-            if not hasattr(self, command):
+            job = M.build(data[0])
+            if not job:
                 LOG.error('Session %s: UNKNOWN COMMAND RECEIVED:: %s' % (
-                    self.session_id, command))
+                    self.session_id, job_attr))
                 return
 
-            LOG.info("Session::%s: command:: %s" % (self.session_id, command))
+            LOG.info("Session::%s: job:: %r" % (self.session_id, job))
 
-            return getattr(self, command)(*self.job_attr[1:])
+            if isinstance(job, Job):
+                self.job(job.remote_user, job.request)
 
-        def job(self, *args):
+        def job(self, remote_user, request):
             LOG.info('Recv:: JOB for session %s', self.session_id)
-            try:
-                remote_user, request = json.loads(args[0])
-            except ValueError:
-                LOG.error('Malformed request received: %s' % args[0])
-                return
             command = request['script']
             env = request['env']
             proc = Processor(remote_user)
@@ -352,14 +344,14 @@ class AgentNode(Daemon):
             # For long-running jobs
             # self.socket.send_multipart([self.session_id,
             #                            StatusCodes.WORKING,
-            #                            json.dumps(dict(stdout=value))])
+            #                            msgpack.packb(dict(stdout=value))])
 
             proc_iter = iter(proc.run(command, lang, env, inlines=incl_header))
             proc = next(proc_iter)
 
             def _encode(data):
                 try:
-                    return json.dumps(data)
+                    return msgpack.packb(data)
                 except:
                     return ""
 
@@ -401,38 +393,25 @@ class AgentNode(Daemon):
                         if fd_type == proc.STDOUT:
                             data = proc.read_out()
                             if data:
-                                enc_data = _encode(dict(stdout=data))
-                                if enc_data:
-                                    self._yield_reply(
-                                        StatusCodes.STDOUT,
-                                        proc.run_as,
-                                        enc_data)
+                                self._yield_reply(StatusCodes.STDOUT,
+                                                  proc.run_as, data)
                         if fd_type == proc.STDERR:
                             data = proc.read_err()
                             if data:
-                                enc_data = _encode(dict(stderr=data))
-                                if enc_data:
-                                    self._yield_reply(
-                                        StatusCodes.STDERR,
-                                        proc.run_as,
-                                        enc_data)
+                                self._yield_reply(StatusCodes.STDERR,
+                                                  proc.run_as, data)
 
                 run_as, ret_code, stdout, stderr, env = next(proc_iter)
             else:
                 # Error invoking Popen, get params
                 run_as, ret_code, stdout, stderr, env = proc
                 if stdout:
-                    self._yield_reply(StatusCodes.STDOUT,
-                                      run_as,
-                                      json.dumps(dict(stdout=stdout)))
+                    self._yield_reply(StatusCodes.STDOUT, run_as, stdout)
                 if stderr:
-                    self._yield_reply(StatusCodes.STDERR,
-                                      run_as,
-                                      json.dumps(dict(stderr=stderr)))
+                    self._yield_reply(StatusCodes.STDERR, run_as, stderr)
 
-            job_result = json.dumps(dict(env=env,
-                                         ret_code=ret_code,
-                                         stdout=stdout, stderr=stderr))
+            job_result = dict(env=env, ret_code=ret_code,
+                              stdout=stdout, stderr=stderr)
             LOG.info('Job [%s] DONE' % (self.session_id))
             self._yield_reply(StatusCodes.FINISHED, run_as, job_result)
 
@@ -453,16 +432,16 @@ class AgentNode(Daemon):
             LOG.info("Session::%s :: ERR:: %s" % (self.session_id, args))
             self._close()
 
-    def target_match(self, *args):
-        session_id, targets = args[0], args[1]
-        if self.matcher.is_match(targets):
+    def target_match(self, job):
+        if self.matcher.is_match(job.targets):
             try:
-                session = AgentNode.Session(session_id, self.backend)
+                session = AgentNode.Session(job.job_id, self.backend)
                 session.start()
-                self.sessions[session_id] = session
+                self.sessions[job.job_id] = session
                 return True
             except Exception, ex:
-                LOG.error("Cannot start Job Session: %r" % ex)
+                LOG.error("Cannot start Job Session")
+                LOG.exception(ex)
         return False
 
     def clean(self, *args):
@@ -481,11 +460,12 @@ def _parser():
         description="CloudRunner Node tool",
         formatter_class=argparse.RawTextHelpFormatter)
 
-    actions = parser.add_subparsers(dest="action",
-                                    help='Apply action on the daemonized process\n'
-                                    'For the actions [start, stop, restart] - pass a pid file\n'
-                                    'Configure - performs initial configuration\n'
-                                    'Run - start process in debug mode\n')
+    actions = parser.add_subparsers(
+        dest="action",
+        help='Apply action on the daemonized process\n'
+        'For the actions [start, stop, restart] - pass a pid file\n'
+        'Configure - performs initial configuration\n'
+        'Run - start process in debug mode\n')
 
     _common_run = argparse.ArgumentParser(add_help=False)
 
@@ -556,8 +536,8 @@ def _parser():
         unregister_cli = actions.add_parser('unregister_cli')
         unregister_cli.add_argument('-cn', '--common-name',
                                     help='Common name of the certificate'
-                                    'to be removed as listed in subject. Use:\n'
-                                    '\tcloudrunner-exec details\n'
+                                    'to be removed as listed in subject. '
+                                    'Use:\n\tcloudrunner-exec details\n'
                                     'to find the fingerprint')
 
         unregister_cli.add_argument('-fp', '--fingerprint',
@@ -566,7 +546,7 @@ def _parser():
                                     '\tcloudrunner-exec details\n'
                                     'to find the fingerprint')
 
-        list_cli = actions.add_parser('list_cli')
+        actions.add_parser('list_cli')
 
     return parser
 

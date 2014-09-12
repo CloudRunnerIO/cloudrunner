@@ -17,8 +17,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import logging
 import os
 import re
+import shlex
 
 LANG_BASH = "bash"
 LANG_PS = "ps"
@@ -35,6 +37,8 @@ if os.name != 'nt':
     DEFAULT_LANG = LANG_BASH
 else:
     DEFAULT_LANG = LANG_PS
+
+LOG = logging.getLogger()
 
 
 def parse_selectors(section):
@@ -73,6 +77,85 @@ def parse_lang(section):
 
 def remove_shebangs(script):
     return LANG.sub('', script)
+
+
+class ParseError(Exception):
+    pass
+
+
+class Args(object):
+
+    def __init__(self, *args):
+        self._items = {}
+        for arg in args:
+            k, _, v = arg.partition('=')
+            k = k.lstrip('-')
+            self._items[k] = v
+
+    def get(self, k, default=None):
+        return self._items.get(k, default)
+
+    def __getattr__(self, k, default=None):
+        return self._items.get(k, default)
+
+    def __contains__(self, k):
+        return k in self._items
+
+    def __getitem__(self, k):
+        return self._items['k']
+
+
+class Section(object):
+
+    def __init__(self):
+        self.timeout = None
+        self.args = []
+        self.args_string = ''
+        self.header = ""
+        self.body = ""
+        self.lang = ""
+        self.target = ''
+
+    @property
+    def script(self):
+        return "%s\n%s" % (self.header, self.body)
+
+    def update_targets(self, env):
+        params = has_params(self.target)
+        if params:
+            for sel_param in params:
+                sel, param = sel_param
+                param_name = param.replace('$', '')
+                if param_name in env:
+                    param_val = env[param_name]
+                    if isinstance(param_val, list):
+                        repl_params = ' '.join(
+                            ['%s%s' % (sel, val) for val in param_val])
+                    else:
+                        repl_params = sel + param_val
+                    self.target = self.target.replace(
+                        sel + param, repl_params)
+
+
+def parse_sections(document):
+    try:
+        strings = re.split(SECTION_SPLIT, document, re.M)
+        strings.pop(0)
+        sections = []
+        for i in range(0, len(strings), 2):
+            section = Section()
+            section.header = strings[i]
+            section.body = strings[i + 1]
+            section.lang = parse_lang(strings[i + 1])
+            sections.append(section)
+            target, args = parse_selectors(section.header)
+            section.target = target
+            section.args = Args(*shlex.split(args))
+            section.args_string = args
+        return sections
+    except Exception, exc:
+        LOG.error(exc)
+        raise ParseError("Error parsing script")
 
 
 def split_sections(document):

@@ -23,7 +23,7 @@ if os.name != 'nt':
     raise unittest.case.SkipTest(
         "The rest of this code will not be run on Linux.")
 
-import json
+import msgpack
 import logging
 import os
 import threading
@@ -32,7 +32,6 @@ import win32security as winsec
 import win32con
 import win32api
 
-from cloudrunner.core.message import StatusCodes
 from cloudrunner.core.platform import AsyncPipeReader
 from cloudrunner.util.nt import chmod
 
@@ -75,7 +74,7 @@ class CredentialManager(object):
         self.credentials = {}
         try:
             with open(credentials_map_file) as f:
-                cred_map = json.loads(f.read())
+                cred_map = msgpack.unpackb(f.read())
 
             for user, pwd in cred_map.items():
                 cred = Cred(user, pwd)
@@ -147,7 +146,6 @@ class NtProcessor(object):
         pass
 
     def popen(self, exec_file_args, session_cwd, env):
-        (stdout, stderr, ret_code) = ("", "", -250)
         # self.impersonate()
         try:
             proc = subprocess.Popen(exec_file_args,

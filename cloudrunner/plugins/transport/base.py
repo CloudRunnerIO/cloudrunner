@@ -70,7 +70,8 @@ class TransportBackend(object):
                 prop_key = opt.rpartition('.')[2]
                 conf[prop_key] = val
         override_kwargs = dict((key, val) for key, val in kwargs.items()
-                               if key in cls.config_options and val is not None)
+                               if key in cls.config_options
+                               and val is not None)
         conf.update(override_kwargs)
         return cls(**conf)
 

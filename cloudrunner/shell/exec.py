@@ -23,13 +23,9 @@ try:
 except ImportError:
     pass
 import argparse
-import errno
-import json
+import msgpack
 import logging
 import os
-from select import select
-from select import error as sel_err
-import socket
 import sys
 
 from cloudrunner import CONFIG_SHELL_LOC
@@ -37,6 +33,7 @@ from cloudrunner import LIB_DIR
 from cloudrunner.core import message
 from cloudrunner.core import parser
 from cloudrunner.core.message import StatusCodes
+from cloudrunner.shell.api import AsyncResp
 from cloudrunner.util.config import Config
 from cloudrunner.util.loader import load_plugins
 from cloudrunner.util.loader import local_plugin_loader
@@ -49,7 +46,6 @@ from cloudrunner.util.http import parse_url
 from cloudrunner.core.exceptions import Unauthorized
 
 CONFIG = Config(CONFIG_SHELL_LOC)
-PLUGINS = {}
 
 LOG_FORMAT = '! %(levelname)s:%(message)s'
 
@@ -100,11 +96,7 @@ class ShellRunner(object):
         shell = Shell(args=self.args)
 
         if not hasattr(shell, self.args.controller):
-            if self.args.controller in PLUGINS:
-                plugin_cmd = PLUGINS[self.args.controller]
-                getattr(shell, plugin_cmd)()
-            else:
-                console.red("Unrecognized command: ", self.args.controller)
+            console.red("Unrecognized command: ", self.args.controller)
         else:
             getattr(shell, self.args.controller)()
 
@@ -175,7 +167,7 @@ class Shell(object):
 
     def _create_backend(self):
         transport = CONFIG.transport_class or \
-            'cloudrunner.plugins.transport.zmq_transport.ZmqCliTransport'
+            'cloudrunner.plugins.transport.rest_transport.RESTTransport'
         transport_class = local_plugin_loader(transport)
         if not transport_class:
             console.red("Cannot instantiate transport class: %s",
@@ -230,7 +222,7 @@ class Shell(object):
                                                         **kwargs)
                 if status != 0:
                     console.red("Error reading script from address.",
-                                "Server returned code:", status, script)
+                                "Server returned code:", status)
                     exit(1)
             elif not os.path.exists(_script):
                 console.red("Script %s doesn't exist" % _script)
@@ -281,7 +273,7 @@ class Shell(object):
         self.queue.send(*req.pack())
         success, resp = self.queue.recv(timeout=5)
         try:
-            result = json.loads(resp)
+            result = msgpack.unpackb(resp)
         except:
             console.red('Error: ', resp)
             exit(1)
@@ -330,88 +322,6 @@ class Shell(object):
         for node in result[1]:
             console.blue(node)
 
-    @needs_config
-    def plugins_get(self, *ar):
-
-        req = self._request()
-
-        req.append(control='plugins')
-
-        result = []
-
-        self.queue.send(*req.pack())
-        resp = self.queue.recv(timeout=3)
-        if not resp:
-            console.red('Cannot connect to server %s' %
-                        self.backend.dispatcher_uri)
-            raise Exit()
-
-        if len(resp) > 1:
-            result = json.loads(resp[1])
-        else:
-            console.red('Error: ', resp[0])
-            exit(1)
-
-        return result
-
-    def plugins(self):
-        result = self.plugins_get()
-
-        console.green("=" * 80)
-        console.green("Plugins available on Master", bold=1)
-        console.green("=" * 80)
-
-        console.new_line()
-
-        console.green('*' * 3, "Job Plugins", '*' * 3)
-        for arg in result[0]:
-            console.blue(arg[0])
-            console.yellow('\t' + '\n\t'.join(arg[1]))
-
-        console.new_line()
-        console.green('*' * 3, "CLI Plugins", '*' * 3)
-        console.blue(result[1][0])
-        console.yellow('\t' + '\n\t'.join(result[1][1]))
-
-    @needs_config
-    def plugin_get(self):
-        req = self._request()
-        req.append(plugin=self.args.controller)
-
-        req.append(control='plugin', data=self._script(ignore=True))
-
-        req.append(args='"' + '" "'.join(self.args.xargs) + '"')
-
-        self.queue.send(*req.pack())
-        resp = self.queue.recv(timeout=5)
-        if not resp:
-            console.red('Cannot connect to server')
-            raise Exit()
-
-        if len(resp) > 1:
-            return json.loads(resp[1])
-        else:
-            console.red('Error: ', resp[0])
-            return ""
-
-    def plugin(self):
-
-        result = self.plugin_get()
-
-        console.green("=" * 80)
-        console.green("Result from plugin run:", bold=1)
-        console.green("=" * 80)
-
-        if result:
-            for res in result:
-                success, msg = res
-                if success:
-                    console.blue(msg)
-                else:
-                    console.red(msg)
-        else:
-            console.red('Error: %s' % result)
-
     def capture_run(self):
         colors.disable()
         from StringIO import StringIO
@@ -434,7 +344,7 @@ class Shell(object):
         req = self._request()
         req.append(control='attach')
 
-        req.append(data=json.dumps(self.args.targets))
+        req.append(data=msgpack.packb(self.args.targets))
         req.append(session_id=self.args.session_id)
         # we do not know the original timeout,
         self.timeout = sys.maxint / 1000
@@ -455,7 +365,7 @@ class Shell(object):
         req.append(control='notify')
 
         req.append(data=data or self._script(tgt='input'))
-        req.append(targets=targets or json.dumps(self.args.targets))
+        req.append(targets=targets or msgpack.packb(self.args.targets))
         req.append(session_id=session_id or self.args.session_id)
         req.append(job_id=job_id or self.args.job_id)
 
@@ -497,7 +407,7 @@ class Shell(object):
             console.red('Error: ', r[0])
             exit(2)
 
-        reply = json.loads(resp)
+        reply = msgpack.unpackb(resp)
         if reply[0]:
             console.blue(reply[1])
         else:
@@ -543,7 +453,7 @@ class Shell(object):
 
         if self.args.env:
             try:
-                self.env = json.loads(self.args.env)
+                self.env = msgpack.unpackb(self.args.env)
             except Exception, ex:
                 LOG.exception(ex)
                 exit(1)
@@ -626,7 +536,6 @@ class Shell(object):
             console.green("Remote execution", bold=1)
             console.green("=" * 80)
 
-            session_id = None
             self.renderer.capture(notify=self.notify,
                                   terminate=self.terminate)
         else:
@@ -634,9 +543,9 @@ class Shell(object):
             r = self.queue.recv(timeout=5)
             job_id = None
             if r[0] == 'FINISHED':
-                job_id = json.loads(r[1])[0]['jobid']
+                job_id = msgpack.unpackb(r[1])[0]['jobid']
             if r[0] == 'PIPEOUT':
-                job_id = json.loads(r[1])[0]
+                job_id = msgpack.unpackb(r[1])[0]
 
             return job_id
         self.close()
@@ -688,129 +597,95 @@ class ResultPrinter(object):
         self.running = True
         self.last_line, self.last_node = None, None
 
-    def unpack(self, count, frames):
-        l = list(frames[:count])
-        l.append(frames[count:])
-        return l
-
     def capture(self, notify, terminate):
         self.session_id = None
         self.job_id = None
-        sock_fd = self.msg_queue.fd()
 
-        def parse_result(sock):
-            for r in sock.recv_nb():
-                if not r:
-                    continue
-                try:
-                    r_type, data = self.unpack(1, r)
-                    self.session_id = data[0]
-                except:
-                    console.red('Error: ', r)
-                    exit(2)
+        def parse_result(msg):
+            self.session_id = msg.session_id
 
-                self.out(r_type, data)
-                if r_type == "PIPEOUT":
-                    self.job_id = data[6]
+            self.out(msg)
+            self.job_id = getattr(msg, 'step_id', None)
 
-        while self.running:
+        try:
+            resp = AsyncResp("", self.msg_queue)
+            for msg in resp:
+                parse_result(msg)
+
+        except KeyboardInterrupt:
+            console.green("\nChoose exit option:")
+            if self.session_id:
+                console.green(
+                    "\t[s]end input data for remote process\n"
+                    "\t[t]erminate the remote process(es) [SIGTERM]\n"
+                    "\t[k]ill the remote process(es) [SIGKILL]\n"
+                    "\t[c]ontinue execution or [e]xit the program")
+            choice = None
             try:
-                try:
-                    ready = select([sock_fd], [], [], 1)[0]
-                except sel_err, err:
-                    if err[0] != errno.EINTR:
-                        raise
-                    ready = {}
-                if sock_fd in ready:
-                    parse_result(self.msg_queue)
-
+                choice = raw_input()
             except KeyboardInterrupt:
-                console.green("\nChoose exit option:")
-                if self.session_id:
-                    console.green("\t[s]end input data for remote process\n"
-                                  "\t[t]erminate the remote process(es) [SIGTERM]\n"
-                                  "\t[k]ill the remote process(es) [SIGKILL]\n"
-                                  "\t[c]ontinue execution or [e]xit the program")
-                choice = None
-                try:
-                    choice = raw_input()
-                except KeyboardInterrupt:
-                    choice = "E"
-                if self.session_id and choice in ['s', 'S']:
-                    print "Enter targets(Hit Enter for all):"
-                    targets = sys.stdin.readline()
-                    if not targets.strip():
-                        # all
-                        targets = '*'
-                    print "Enter input data(Ctrl+D for end):"
-                    data = ''.join(sys.stdin.readlines())
-                    notify(
-                        self.session_id, self.job_id, data, targets,
-                        to_read=False)
-                    parse_result(self.msg_queue)
-                elif choice in ['t', 'T']:
-                    terminate(self.session_id, sig='term', to_read=False)
-                    parse_result(self.msg_queue)
-                elif choice in ['k', 'K']:
-                    terminate(self.session_id, sig='kill', to_read=False)
-                    parse_result(self.msg_queue)
-                else:
-                    self.running = False
-                    console.blue("Good bye!")
+                choice = "E"
+            if self.session_id and choice in ['s', 'S']:
+                print "Enter targets(Hit Enter for all):"
+                targets = sys.stdin.readline()
+                if not targets.strip():
+                    # all
+                    targets = '*'
+                print "Enter input data(Ctrl+D for end):"
+                data = ''.join(sys.stdin.readlines())
+                notify(
+                    self.session_id, self.job_id, data, targets,
+                    to_read=False)
+                parse_result(self.msg_queue)
+            elif choice in ['t', 'T']:
+                terminate(self.session_id, sig='term', to_read=False)
+                parse_result(self.msg_queue)
+            elif choice in ['k', 'K']:
+                terminate(self.session_id, sig='kill', to_read=False)
+                parse_result(self.msg_queue)
+            else:
+                self.running = False
+                console.blue("Good bye!")
         return
 
-    def out(self, rtype, resp):
-        if rtype in StatusCodes.pending():
-            if len(resp) == 14:
-                self.print_header(*resp)
-            else:
-                self.print_partial(*resp)
-        elif rtype == StatusCodes.FINISHED:
-            try:
-                data = json.loads(resp[7])
-                if isinstance(data, basestring):
-                    data = json.loads(data)
-                self.print_final(data)
-            except Exception, ex:
-                print "Error", resp, ex
+    def out(self, resp):
+        if resp.type in StatusCodes.pending():
+            self.print_partial(**vars(resp))
+        elif resp.type == StatusCodes.FINISHED:
+            self.print_final(**vars(resp))
             self.running = False
         else:
             console.log(resp)
 
-    def print_header(self, time, run_id, caller, owner, org, targets, *args):
-        # switch
-        console.yellow('-' * 80, bold=1)
-        console.yellow("ID: ", run_id, "", bold=True)
-        console.yellow("#! switch [", targets, "]", bold=True)
-        console.yellow('-' * 80, bold=1)
-
-    def print_partial(self, run_id, time, caller, owner, org, targets, tags,
-                      job_id, run_as, node=None, stdout=None, stderr=None):
-        if self.last_line != job_id or self.last_node != node:
-            console.blue('*' * 4, job_id, ':', node, run_as, '*' * 4, bold=1)
-        self.last_line = job_id
+    def print_partial(self, step_id=None, run_as=None, node=None,
+                      stdout=None, stderr=None, **kwargs):
+        if self.last_line != step_id or self.last_node != node:
+            console.blue('*' * 4, "Task", step_id, ':', run_as, '@', node,
+                         '*' * 4, bold=1)
+        self.last_line = step_id
         self.last_node = node
         if stdout:
             console.log(stdout)
         if stderr:
             console.red(stderr)
 
-    def print_final(self, results):
+    def print_final(self, response=None, exit_code=None, session_id=None,
+                    **kwargs):
         console.yellow("=" * 30, "Job stats:", "=" * 30, bold=True)
-        for result in results:
-            #console.blue("Run Id: ", result.get('run_id', ''), bold=1)
-            console.blue("#! switch [", result['targets'], "] @",
-                         result['jobid'], bold=1)
-            if result.get('args', False):
-                console.blue("Args: ",
-                             ' '.join(result['args']), bold=1)
-            for node in result['nodes']:
+        for step in response.get("steps", []):
+            # console.blue("Run Id: ", step.get('run_id', ''), bold=1)
+            console.blue("#! switch [", step['target'], "] @ Task",
+                         step['index'], bold=1)
+            # if step.get('args', False):
+            #    console.blue("Args: ",
+            #                 ' '.join(step['args']), bold=1)
+            for node in step.get('nodes', []):
                 if node['ret_code'] == 0:
                     color = console.green
                 else:
                     color = console.red
-                color('> ', node['node'], '[exit code: %s]' %
-                      node['ret_code'], bold=1)
+                color('> ', node['node'],
+                      '[exit code: %s]' % node['ret_code'], bold=1)
 
 
 def _parser():
@@ -831,19 +706,20 @@ def _parser():
             'dispatcher_uri=tcp://server:port\n\n'
             'or as env variable CLOUDRUNNER_SERVER')
 
-        user_arg = _common.add_argument('-u', '--user',
-                                        default=os.environ.get(
-                                        'CLOUDRUNNER_USER', None),
-                                        help='User name to authenticate at '
-                                        'Master.\nCould be set as env variable '
-                                        'CLOUDRUNNER_USER instead.')
+        user_arg = _common.add_argument(
+            '-u', '--user', default=os.environ.get(
+                'CLOUDRUNNER_USER', None),
+            help='User name to authenticate at '
+            'Master.\nCould be set as env variable '
+            'CLOUDRUNNER_USER instead.')
 
-        token_arg = _common.add_argument('-p', '--pass', dest='token',
-                                         default=os.environ.get(
-                                         'CLOUDRUNNER_TOKEN', None),
-                                         help='Password/Token authenticate at '
-                                         'Master.\nCould be set as env variable '
-                                         'CLOUDRUNNER_TOKEN instead.')
+        token_arg = _common.add_argument(
+            '-p', '--pass', dest='token',
+            default=os.environ.get(
+                'CLOUDRUNNER_TOKEN', None),
+            help='Password/Token authenticate at '
+            'Master.\nCould be set as env variable '
+            'CLOUDRUNNER_TOKEN instead.')
 
         _common.add_argument('-v', '--verbose', action='store_true',
                              help="Show verbose info")
@@ -851,17 +727,17 @@ def _parser():
                              help='Label runs with tags. '
                              'Allows multiple values')
 
-    tout_arg = _common.add_argument('-t', '--timeout', default=60,
-                                    help='Timeout to expect result from '
-                                    'Master in seconds.\nDefault is'
-                                    ' %(default)s seconds.\n'
-                                    'Set -1 for a persistent job')
+    _common.add_argument('-t', '--timeout', default=60,
+                         help='Timeout to expect result from '
+                         'Master in seconds.\nDefault is'
+                         ' %(default)s seconds.\n'
+                         'Set -1 for a persistent job')
 
-    conf_arg = _common.add_argument('-c', '--config',
-                                    default=None,
-                                    help='Path to a config file.\n'
-                                    'Defaults to %s seconds.' %
-                                    CONFIG_SHELL_LOC)
+    _common.add_argument('-c', '--config',
+                         default=None,
+                         help='Path to a config file.\n'
+                         'Defaults to %s seconds.' %
+                         CONFIG_SHELL_LOC)
 
     controllers = _parser.add_subparsers(dest='controller',
                                          help='Shell commands')
@@ -928,8 +804,8 @@ def attach_standalone_options(controllers, _common):
     configure.add_argument('-o', '--overwrite', action='store_true',
                            help="Overwrite existing configuration")
 
-    details = controllers.add_parser('details', parents=[_common],
-                                     help="Display current configuration")
+    controllers.add_parser('details', parents=[_common],
+                           help="Display current configuration")
 
     if CONFIG.security.peer_cache:
         peers = controllers.add_parser('peers',
@@ -1009,134 +885,9 @@ def attach_server_options(controllers, _common, user_arg, token_arg, server):
     terminate.add_argument('--kill', action='store_true',
                            help="Send SIGKILL instead of SIGTERM")
 
-    # Plugins
-    controllers.add_parser('plugins', parents=[_common],
-                           help='Shows available plugins on Master')
-
-    # Plugins
-    def dynamic_loader(prefix, parsedargs, **kwargs):
-        if os.environ.get('COMP_LINE'):
-            positionals = os.environ.get('COMP_LINE').split()[1:]
-        else:
-            positionals = sys.argv[1:]
-
-        if positionals:
-            if hasattr(Shell, positionals[0]):
-                # known function
-                return
-            elif not filter(lambda x: not x.startswith('-'), positionals):
-                # not a command, maybe help
-                return
-
-        global __AVAIL_PLUGINS__
-        try:
-            assert __AVAIL_PLUGINS__
-        except NameError:
-            ret = Shell(action="plugins",
-                        user=user_arg.default,
-                        server=server.default,
-                        token=token_arg.default,
-                        ).plugins_get(no_exit=True)
-            if not ret:
-                return []
-
-            success, plugins = ret
-            __AVAIL_PLUGINS__ = [str(p[0]) for p in plugins]
-        opts = []
-        if not positionals or positionals[0] not in __AVAIL_PLUGINS__:
-            opts = [p for p in __AVAIL_PLUGINS__]
-            for opt in opts:
-                p_parser = controllers.add_parser(
-                    opt, parents=[_common], help='Run a plugin on Master')
-
-        else:
-            plugin = positionals[0]
-            p_parser = controllers.add_parser(
-                plugin, parents=[_common], help='Plugin %s' % plugin)
-            if positionals[1:]:
-                p_parser.add_argument(
-                    'xargs', nargs='+').completer = dynamic_completer
-            positionals.append('--jhelp')
-            PLUGINS[plugin] = 'plugin'
-            success, opts = Shell(action="plugin",
-                                  controller=plugin,
-                                  user=user_arg.default,
-                                  script="",
-                                  inline=False,
-                                  server=server.default,
-                                  token=token_arg.default,
-                                  timeout=2,
-                                  xargs=positionals[1:]).plugin_get()[0]
-            for opt in opts:
-                if isinstance(opt, dict):
-                    for k, v in opt.items():
-                        _actions = p_parser.add_subparsers(dest=k)
-                        for action in v:
-                            _actions.add_parser(action)
-                elif opt.startswith("@"):
-                    # store_true
-                    opt = opt.replace('@', '--')
-                    p_parser.add_argument(
-                        opt, action='store_true').completer = \
-                        dynamic_completer
-                else:
-                    p_parser.add_argument(
-                        opt).completer = dynamic_completer
-
-    def dynamic_completer(prefix, parsed_args, **kwargs):
-        global __AVAIL_PLUGINS__
-        try:
-            assert __AVAIL_PLUGINS__
-        except NameError:
-            success, plugins = Shell(action="plugins",
-                                     user=user_arg.default,
-                                     server=server.default,
-                                     token=token_arg.default,
-                                     ).plugins_get()
-            __AVAIL_PLUGINS__ = [str(p[0]) for p in plugins]
-
-        param = os.environ.get('COMP_LINE', prefix)
-        positionals = param.split()[1:]
-
-        if not positionals:
-            return (p for p in __AVAIL_PLUGINS__)
-        if positionals[0] not in __AVAIL_PLUGINS__:
-            return (p for p in __AVAIL_PLUGINS__)
-
-        positionals.append('--jhelp')
-
-        try:
-            success, opts = Shell(action="plugin",
-                                  controller=positionals[0],
-                                  user=user_arg.default,
-                                  script="",
-                                  inline=False,
-                                  server=server.default,
-                                  token=token_arg.default,
-                                  timeout=2,
-                                  xargs=positionals[1:]).plugin_get()[0]
-        except Exception, ex:
-            return (str(ex),)
-
-        args = []
-        try:
-            for opt in opts:
-                if isinstance(opt, dict):
-                    args.extend(opts.values())
-                elif opt.startswith('@'):
-                    args.append(opt.replace('@', '--'))
-                else:
-                    args.append(opt)
-        except Exception, ex:
-            return (str(ex),)
-
-        return (x for x in args)
-
-    dynamic_loader(None, None)
-
     # Nodes
-    list_nodes = controllers.add_parser('list_nodes', parents=[_common],
-                                        help='List nodes on master')
+    controllers.add_parser('list_nodes', parents=[_common],
+                           help='List nodes on master')
 
     controllers.add_parser('list_active_nodes',
                            parents=[_common],

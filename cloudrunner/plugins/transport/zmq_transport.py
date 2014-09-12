@@ -500,12 +500,12 @@ class SockWrapper(Endpoint):
                 self._sock.send_multipart(list(frames))
         except zmq.ZMQError, zerr:
             LOGC.warning(frames)
-            LOGC.exception(zerr)
             if self._sock.context.closed or \
                     zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
                     or zerr.errno == zmq.ENOTSOCK:
                 # System interrupt
                 raise ConnectionError()
+            LOGC.error(zerr)
 
     def recv(self, timeout=None):
         try:

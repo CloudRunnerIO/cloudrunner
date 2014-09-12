@@ -258,7 +258,7 @@ class MsgWrapper(object):
 class Dispatch(M):
 
     dest = ''
-    fields = ["user", "roles", "tasks", "includes", "attachments"]
+    fields = ["user", "roles", "tasks", "includes", "attachments", "env"]
 
 
 class GetNodes(M):
@@ -418,7 +418,11 @@ class PipeMessage(M):
 
 class FinishedMessage(M):
     status = StatusCodes.FINISHED
-    fields = ["type", "session_id", "ts", "seq_no",
+    fields = ["type", "session_id", "ts",
               "user", "org", "result", "env"]
 
     type = "FINISHED"
+
+
+class EnvBroadcast(M):
+    fields = ["session_id", "key", "value"]

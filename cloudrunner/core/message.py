@@ -178,9 +178,6 @@ class M(object):
                 p.skip(lambda p: data.append(p))
             except msgpack.OutOfData:
                 break
-        if len(data) % 2 == 1:
-            # Corrupted?
-            data.pop()
         return ''.join(data)
 
     @classmethod

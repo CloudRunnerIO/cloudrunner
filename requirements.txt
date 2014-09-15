@@ -2,4 +2,4 @@ pyzmq
 M2Crypto
 httplib2
 argparse
-msgpack-python
+msgpack-python>=0.4

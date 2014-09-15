@@ -18,7 +18,6 @@
 #    under the License.
 
 import os
-import shutil
 import sys
 
 if sys.version_info < (2, 7):

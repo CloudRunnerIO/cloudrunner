@@ -17,7 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import msgpack
+import json
 
 
 def stringify(*values):
@@ -28,16 +28,6 @@ def stringify(*values):
             yield value.encode('utf8')
         else:
             yield str(value)
-
-
-def jsonify(*values):
-    for value in values:
-        if value is None:
-            yield ''
-        if isinstance(value, unicode):
-            yield value.encode('utf8')
-        else:
-            yield value #  msgpack.packb(value)
 
 
 def stringify1(value):
@@ -55,4 +45,4 @@ def jsonify1(value):
     if isinstance(value, unicode):
         return value.encode('utf8')
     else:
-        return msgpack.packb(value)
+        return json.dumps(value)

@@ -25,6 +25,7 @@ BuildRequires: python-devel
 Requires: python-argparse
 Requires: m2crypto
 Requires: python-zmq
+Requires: msgpack-python >= 0.4
 Requires: python-httplib2
 Requires: python-setuptools
 

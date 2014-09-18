@@ -118,7 +118,7 @@ class Daemon(object):
         except Exception, ex:
             sys.stdout.write('run Failed : %r' % ex)
 
-    def stop(self):
+    def stop(self, *args, **kwargs):
         """
         Stop the daemon
         """
@@ -148,7 +148,7 @@ class Daemon(object):
             else:
                 sys.exit(1)
 
-    def restart(self):
+    def restart(self, *args, **kwargs):
         """
         Restart the daemon
         """

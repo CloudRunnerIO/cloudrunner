@@ -90,7 +90,7 @@ class Args(object):
         for arg in args:
             k, _, v = arg.partition('=')
             k = k.lstrip('-')
-            self._items[k] = v
+            self._items.setdefault(k, []).append(v)
 
     def get(self, k, default=None):
         return self._items.get(k, default)
@@ -119,22 +119,6 @@ class Section(object):
     @property
     def script(self):
         return "%s\n%s" % (self.header, self.body)
-
-    def update_targets(self, env):
-        params = has_params(self.target)
-        if params:
-            for sel_param in params:
-                sel, param = sel_param
-                param_name = param.replace('$', '')
-                if param_name in env:
-                    param_val = env[param_name]
-                    if isinstance(param_val, list):
-                        repl_params = ' '.join(
-                            ['%s%s' % (sel, val) for val in param_val])
-                    else:
-                        repl_params = sel + param_val
-                    self.target = self.target.replace(
-                        sel + param, repl_params)
 
 
 def parse_sections(document):

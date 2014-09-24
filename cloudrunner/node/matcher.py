@@ -18,12 +18,7 @@
 #    under the License.
 
 import logging
-from socket import gethostname
-import platform
 import re
-
-from cloudrunner.version import VERSION
-from cloudrunner.util.net import get_local_ips
 
 SPLITTER = re.compile(r'\s+|,|;')
 
@@ -36,37 +31,9 @@ class Matcher(object):
         Provides basic matching functions for node targets
     """
 
-    def __init__(self, node_id):
-        self.props = {}
+    def __init__(self, node_id, meta):
         self.node_id = node_id
-        self.host = gethostname().lower()
-        self.os = platform.system()
-        self.arch = platform.machine()
-        try:
-            # only OS, not version
-            self.dist = platform.linux_distribution()[0]
-            if not self.dist:
-                # Try a hack for ArchLinux
-                self.dist = platform.linux_distribution(
-                    supported_dists=('arch'))[0]  # only OS, not version
-        except:
-            # Python < 2.6
-            self.dist = platform.dist()[0]  # only OS, not version
-        self.release = platform.release()
-        self.ips = []
-        try:
-            self.ips = get_local_ips()
-        except:
-            pass
-        if not self.ips:
-            LOG.warn("No IPs were detected")
-
-        self.crn_version = VERSION
-
-    def __setattr__(self, name, value):
-        super(Matcher, self).__setattr__(name, value)
-        if name != 'props':
-            self.props[name] = value
+        self.meta = meta
 
     def is_match(self, target_str):
         targets = SPLITTER.split(target_str)
@@ -77,13 +44,14 @@ class Matcher(object):
                 if '=' in target:
                     # we have specific selector
                     k, _, v = target.partition('=')
-                    if not hasattr(self, k):
+                    if k not in self.meta:
                         return False
-                    return re.match(self.prepare_re(v), getattr(self, k), re.I)
+                    return re.match(self.prepare_re(v), self.meta.get(k), re.I)
                 else:
-                    return re.match(self.prepare_re(target), self.node_id, re.I) \
-                        or target in self.ips
-            except:
+                    return re.match(self.prepare_re(target),
+                                    self.node_id, re.I) or target in self.ips
+            except Exception, ex:
+                LOG.exception(ex)
                 return
 
         return filter(_match, targets)

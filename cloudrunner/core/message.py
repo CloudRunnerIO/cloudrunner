@@ -300,18 +300,18 @@ class Fwd(M):
 class Ident(M):
 
     dest = HEARTBEAT
-    fields = []
+    fields = ['meta']
 
 
 class Welcome(M):
 
-    dest = HEARTBEAT
+    dest = ''
     fields = []
 
 
 class Reload(M):
 
-    dest = HEARTBEAT
+    dest = ''
     fields = []
 
 
@@ -324,7 +324,7 @@ class HB(M):
 class HBR(M):
 
     dest = HEARTBEAT
-    fields = ['node']
+    fields = ['node', 'usage']
 
 
 class Init(M):
@@ -356,12 +356,12 @@ class JobTarget(M):
 # Replies
 
 
-class Control(M):
-    dest = ADMIN_TOWER
-    fields = ['action', 'node', 'data']
-
-
 class Register(M):
+    dest = ADMIN_TOWER
+    fields = ['node', 'data', 'meta']
+
+
+class Control(M):
     fields = ['node', 'status', 'message']
 
 

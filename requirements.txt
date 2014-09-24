@@ -3,3 +3,4 @@ M2Crypto
 httplib2
 argparse
 msgpack-python>=0.4
+psutil>=2.0

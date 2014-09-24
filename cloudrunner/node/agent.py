@@ -19,6 +19,7 @@
 #    under the License.
 
 import logging
+from collections import OrderedDict
 
 from cloudrunner import CONFIG_NODE_LOCATION
 from cloudrunner import NODE_LOG_LOCATION
@@ -124,15 +125,16 @@ class AgentNode(Daemon):
         self.backend.configure(overwrite=self.args.overwrite, **kwargs)
 
     def details(self):
-        self.matcher = Matcher(CONFIG.node_id)
-        props = [(k, v) for (k, v) in self.matcher.props.items()]
-        props = sorted(props, key=lambda x: x[0])
-        print colors.blue('%-30s' % 'ID', bold=1), colors.blue('%s' %
-                                                               CONFIG.node_id)
-        for item in props:
-            print colors.blue('%-30s' % item[0], bold=1), colors.blue(item[1])
         if not hasattr(self, "backend"):
             self.backend = self.transport_class.from_config(CONFIG)
+
+        meta = OrderedDict(sorted(self.backend.meta().items(),
+                                  key=lambda x: x[0]))
+
+        print colors.blue('%-30s' % 'ID', bold=1), colors.blue('%s' %
+                                                               CONFIG.node_id)
+        for k, v in meta.items():
+            print colors.blue('%-30s' % k, bold=1), colors.blue(v)
         if self.backend.properties:
             print colors.blue('===== Backend properties =====')
             for item in self.backend.properties:
@@ -201,11 +203,11 @@ class AgentNode(Daemon):
                       "Run program with config option first")
             exit(1)
 
-        self.matcher = Matcher(self.node_id)
         self.backend = self.transport_class.from_config(
             CONFIG, **vars(self.args))
         load_plugins(CONFIG)
         self.sessions = {}
+        self.matcher = Matcher(self.node_id, self.backend.meta())
 
         LOG.info("Starting node")
         self.details()

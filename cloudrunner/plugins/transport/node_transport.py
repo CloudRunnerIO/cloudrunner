@@ -79,6 +79,9 @@ class NodeTransport(TransportBackend):
             user_store = os.path.join(LIB_DIR, 'cloudrunner', 'user_store.db')
         self.user_store = CertStore(user_store)
 
+    def meta(self):
+        return {}
+
     def loop(self):
         ioloop.IOLoop.instance().start()
 
@@ -217,7 +220,8 @@ class NodeTransport(TransportBackend):
                     peer = session_map.get(frames.pop(0)) or ''
                     if peer:
                         frames.insert(1, self.node_id)
-                        dispatcher.send_multipart([peer, msgpack.packb(frames)])
+                        dispatcher.send_multipart(
+                            [peer, msgpack.packb(frames)])
             except KeyboardInterrupt:
                 LOGC.info('Exiting node listener thread')
                 break

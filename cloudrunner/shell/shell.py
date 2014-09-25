@@ -20,7 +20,6 @@
 
 import cmd
 import glob
-import msgpack
 import logging
 import os
 import re
@@ -490,7 +489,7 @@ class Shell(cmd.Cmd):
                 console.green("========== Summary [%s] ==========" %
                               msg.session_id)
                 try:
-                    self.last_session_id = None #data.get("jobid")
+                    self.last_session_id = None
                     for node in msg.result:
                         line = "%s: exit code: %s" % (node['node'],
                                                       node['ret_code'])

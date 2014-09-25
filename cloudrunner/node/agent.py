@@ -310,7 +310,7 @@ class AgentNode(Daemon):
             job = M.build(data[0])
             if not job:
                 LOG.error('Session %s: UNKNOWN COMMAND RECEIVED:: %s' % (
-                    self.session_id, job_attr))
+                    self.session_id, job))
                 return
 
             LOG.info("Session::%s: job:: %r" % (self.session_id, job))

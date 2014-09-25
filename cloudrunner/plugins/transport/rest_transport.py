@@ -66,7 +66,6 @@ class Dispatch(OutputterMixin):
                         step_id = step.get('step')
                         if lines:
                             for line in lines:
-                                #ts = time.mktime(lines.pop(0))
                                 ts = line.pop(0)
                                 out_type = line.pop(0)
                                 stdout, stderr = "", ""
@@ -92,7 +91,7 @@ class Dispatch(OutputterMixin):
                             running = False
                 time.sleep(1)
 
-        except Exception:
+        except Exception, ex:
             LOG.exception(ex)
             raise StopIteration("Cannot start remote execution on server")
         finally:

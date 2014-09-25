@@ -515,6 +515,7 @@ class NodeTransport(TransportBackend):
                     LOGC.info('Master says: "Certificate approval failed"')
                     return -1
                 else:
+                    LOGC.info('Master says: "%s"' % msg.message)
                     return -1
             else:
                 return -1

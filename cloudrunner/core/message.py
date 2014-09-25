@@ -282,16 +282,6 @@ class Error(M):
     fields = ["msg", "code"]
 
 
-class ScheduleReq(M):
-
-    def __init__(self, control, job_id):
-        self.control = self._str(control)
-        self.job_id = self._str(job_id)
-
-    def pack(self):
-        return [self.control, self.job_id]
-
-
 class Fwd(M):
 
     fields = ['fwd_data']

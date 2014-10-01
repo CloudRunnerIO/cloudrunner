@@ -94,7 +94,7 @@ class NixProcessor(object):
 
     def popen(self, exec_file_name, session_cwd, env):
         proc = Popen(exec_file_name,
-                     shell=False,
+                     shell=True,
                      stdin=PIPE,
                      stdout=PIPE,
                      stderr=PIPE,

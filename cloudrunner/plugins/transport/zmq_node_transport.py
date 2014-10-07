@@ -36,7 +36,7 @@ from cloudrunner.core.message import *  # noqa
 from cloudrunner.util.aes_crypto import Crypter
 from cloudrunner.util.config import Config
 from cloudrunner.util.decorators import catch_ex
-from cloudrunner.util.net import get_local_ips
+from cloudrunner.util.net import get_ips
 from cloudrunner.util.shell import colors
 from cloudrunner.util.tlszmq import TLSZmqClientSocket
 from cloudrunner.plugins.transport.base import TransportBackend
@@ -117,12 +117,13 @@ class NodeTransport(TransportBackend):
                     # Python < 2.6
                     meta['DIST'] = platform.dist()[0]  # only OS, not version
                 meta['RELEASE'] = platform.release()
-                meta['IPS'] = []
+                meta['PUBLIC_IP'] = []
+                meta['PRIVATE_IP'] = []
                 try:
-                    meta['IPS'] = get_local_ips()
+                    meta['PUBLIC_IP'], meta['PRIVATE_IP'] = get_ips()
                 except:
                     pass
-                if not meta['IPS']:
+                if not meta['PUBLIC_IP'] and not meta['PRIVATE_IP']:
                     LOG.warn("No IPs were detected")
 
                 mem = psutil.virtual_memory()

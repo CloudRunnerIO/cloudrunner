@@ -53,7 +53,7 @@ class ZmqCliTransport(TransportBackend):
     proto = 'zmq+ssl'
     config_options = ["node_id", "master_pub", "master_repl",
                       "worker_count", "sock_dir", "security.server",
-                      "security.ssl_cert",  "security.ssl_key",
+                      "security.ssl_cert", "security.ssl_key",
                       "host_resolver", "security.cert_pass",
                       "security.peer_cache", "mode"]
 
@@ -404,8 +404,6 @@ class ZmqCliTransport(TransportBackend):
             host_resolver_file = os.path.join(conf_dir, 'host_resolver.conf')
             try:
                 # Create
-                resolver = HostResolver(host_resolver_file)
-                resolver.add('#host_name', "127.0.0.1:12345")
                 config.update("General",
                               "host_resolver",
                               host_resolver_file)

@@ -50,7 +50,8 @@ from threading import Event
 
 from cloudrunner.core import parser
 from cloudrunner.core.exceptions import ConnectionError
-from cloudrunner.core.message import StatusCodes, Ready, Job, M, JobTarget
+from cloudrunner.core.message import (StatusCodes, Ready, Job, M,
+                                      JobTarget, FileExport)
 from cloudrunner.core.process import Processor
 from cloudrunner.node.matcher import Matcher
 from cloudrunner.plugins.transport.base import TransportBackend
@@ -300,6 +301,15 @@ class AgentNode(Daemon):
             except ConnectionError:
                 self._close()
 
+        def _yield_file(self, file_name, content):
+            LOG.info("[%s] Yielding file %s" % (self.session_id, file_name))
+            try:
+                reply = FileExport(self.session_id, self.session_id,
+                                   file_name, content)
+                self.queue.send(reply._)
+            except ConnectionError:
+                self._close()
+
         def run(self):
             data = self.queue.recv(2)
             if not data:
@@ -322,7 +332,7 @@ class AgentNode(Daemon):
             LOG.info('Recv:: JOB for session %s', self.session_id)
             command = request['script']
             env = request['env']
-            proc = Processor(remote_user)
+            processor = Processor(remote_user)
             lang = parser.parse_lang(command)
 
             LOG.info("Node[%s]::: User:::[%s] UUID:::[%s] LANG:::[%s]" %
@@ -331,91 +341,105 @@ class AgentNode(Daemon):
             if isinstance(command, unicode):
                 command = command.encode('utf8')
 
-            incl_header = []
+            try:
+                atts = request.get('attachments', [])
+                if atts and isinstance(atts, list):
+                    for att in atts:
+                        for name, content in att.items():
+                            # Save libs if any
+                            processor.add_libs(name=name, source=content)
+                # For long-running jobs
+                # self.socket.send_multipart([self.session_id,
+                #                            StatusCodes.WORKING,
+                #                            msgpack.packb(dict(stdout=value))])
 
-            libs = request.get('libs', [])
-            if libs:
-                for lib in libs:
-                    # Save libs if any
-                    script = proc.add_libs(**lib)
-                    if script:
-                        # inline
-                        if isinstance(script, unicode):
-                            script = script.encode('utf8')
-                        incl_header.append(script)
-            # For long-running jobs
-            # self.socket.send_multipart([self.session_id,
-            #                            StatusCodes.WORKING,
-            #                            msgpack.packb(dict(stdout=value))])
+                proc_iter = iter(processor.run(command, lang, env))
+                proc = next(proc_iter)
 
-            proc_iter = iter(proc.run(command, lang, env, inlines=incl_header))
-            proc = next(proc_iter)
+                def _encode(data):
+                    try:
+                        return msgpack.packb(data)
+                    except:
+                        return ""
 
-            def _encode(data):
-                try:
-                    return msgpack.packb(data)
-                except:
-                    return ""
+                if not isinstance(proc, list):
+                    proc.set_input_fd(self.queue)
 
-            if not isinstance(proc, list):
-                proc.set_input_fd(self.queue)
-
-                running = True
-                while running:
-                    to_read = proc.select(.2)
-                    if proc.poll() is not None:
-                        # We are done with the task
-                        LOG.info("Job %s finished" % self.session_id)
-                        running = False
-                        # Do not break, let consume the streams
-                    for fd_type in to_read:
-                        if fd_type == proc.TRANSPORT:
-                            try:
-                                frames = self.queue.recv(0)
-                            except:
-                                continue
-                            if frames and len(frames) == 2:
-                                if frames[0] == 'INPUT':
-                                    try:
-                                        proc.write(frames[1])
-                                    except:
-                                        continue
-                                elif frames[0] == 'TERM':
-                                    if len(frames) > 1 and frames[1] == 'kill':
-                                        # kill task
-                                        proc.kill()
-                                        LOG.info("Job %s killed" %
-                                                 self.session_id)
-                                    else:
-                                        # terminate task
-                                        proc.terminate()
-                                        LOG.info("Job %s terminated" %
-                                                 self.session_id)
+                    running = True
+                    while running:
+                        to_read = proc.select(.2)
+                        if proc.poll() is not None:
+                            # We are done with the task
+                            LOG.info("Job %s finished" % self.session_id)
+                            running = False
+                            # Do not break, let consume the streams
+                        for fd_type in to_read:
+                            if fd_type == proc.TRANSPORT:
+                                try:
+                                    frames = self.queue.recv(0)
+                                except:
                                     continue
-                        if fd_type == proc.STDOUT:
-                            data = proc.read_out()
-                            if data:
-                                self._yield_reply(StatusCodes.STDOUT,
-                                                  proc.run_as, data)
-                        if fd_type == proc.STDERR:
-                            data = proc.read_err()
-                            if data:
-                                self._yield_reply(StatusCodes.STDERR,
-                                                  proc.run_as, data)
+                                if frames and len(frames) == 2:
+                                    if frames[0] == 'INPUT':
+                                        try:
+                                            proc.write(frames[1])
+                                        except:
+                                            continue
+                                    elif frames[0] == 'TERM':
+                                        if (len(frames) > 1 and
+                                                frames[1] == 'kill'):
+                                            # kill task
+                                            proc.kill()
+                                            LOG.info("Job %s killed" %
+                                                     self.session_id)
+                                        else:
+                                            # terminate task
+                                            proc.terminate()
+                                            LOG.info("Job %s terminated" %
+                                                     self.session_id)
+                                        continue
+                            if fd_type == proc.STDOUT:
+                                data = proc.read_out()
+                                if data:
+                                    self._yield_reply(StatusCodes.STDOUT,
+                                                      proc.run_as, data)
+                            if fd_type == proc.STDERR:
+                                data = proc.read_err()
+                                if data:
+                                    self._yield_reply(StatusCodes.STDERR,
+                                                      proc.run_as, data)
 
-                run_as, ret_code, stdout, stderr, env = next(proc_iter)
-            else:
-                # Error invoking Popen, get params
-                run_as, ret_code, stdout, stderr, env = proc
-                if stdout:
-                    self._yield_reply(StatusCodes.STDOUT, run_as, stdout)
-                if stderr:
-                    self._yield_reply(StatusCodes.STDERR, run_as, stderr)
+                    run_as, ret_code, stdout, stderr, env = next(proc_iter)
+                else:
+                    # Error invoking Popen, get params
+                    run_as, ret_code, stdout, stderr, env = proc
+                    if stdout:
+                        self._yield_reply(StatusCodes.STDOUT, run_as, stdout)
+                    if stderr:
+                        self._yield_reply(StatusCodes.STDERR, run_as, stderr)
 
-            job_result = dict(env=env, ret_code=ret_code,
-                              stdout=stdout, stderr=stderr)
-            LOG.info('Job [%s] DONE' % (self.session_id))
-            self._yield_reply(StatusCodes.FINISHED, run_as, job_result)
+                if '__EXPORT__' in env:
+                    try:
+                        file_name = env.pop('__EXPORT__')
+                        path = os.path.join(processor.session_cwd, file_name)
+                        file_size = os.stat(path).st_size
+                        if file_size > 4 * 1024 * 1024:
+                            raise Exception('Exported file size bigger than'
+                                            ' limit(4 MB) [%s]' % file_name)
+                        with open(path) as exp_f:
+                            self._yield_file(file_name, exp_f.read())
+                    except Exception, ex:
+                        LOG.error(ex)
+                        pass
+                job_result = dict(env=env, ret_code=ret_code,
+                                  stdout=stdout, stderr=stderr)
+                LOG.info('Job [%s] DONE' % (self.session_id))
+                self._yield_reply(StatusCodes.FINISHED, run_as, job_result)
+
+            except Exception, ex:
+                LOG.error(ex)
+            finally:
+                processor.clean()
 
             self._close()
             # Invoke clean

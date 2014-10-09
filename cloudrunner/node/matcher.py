@@ -49,7 +49,7 @@ class Matcher(object):
                     return re.match(self.prepare_re(v), self.meta.get(k), re.I)
                 else:
                     return re.match(self.prepare_re(target),
-                                    self.node_id, re.I) or target in self.ips
+                                    self.node_id, re.I)
             except Exception, ex:
                 LOG.exception(ex)
                 return

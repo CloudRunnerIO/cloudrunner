@@ -363,6 +363,10 @@ class StdErr(M):
     fields = ['dest', 'job_id', 'run_as', 'output']
 
 
+class FileExport(M):
+    fields = ['dest', 'job_id', 'file_name', 'content']
+
+
 class Finished(M):
     fields = ['dest', 'job_id', 'run_as', 'result']
 

@@ -170,15 +170,14 @@ class Processor(object):
             if k in new_env:
                 new_env.pop(k)
 
-        shutil.rmtree(self.session_cwd, True)
         yield [self.executor.as_user, ret_code, stdout, stderr, new_env]
 
-    def add_libs(self, name, source, **kwargs):
+    def clean(self):
+        shutil.rmtree(self.session_cwd, True)
+
+    def add_libs(self, name, source):
         try:
             lib_file_name = os.path.join(self.session_cwd, name)
-            if bool(kwargs.get("inline")):
-                # inline include
-                return source
             # Save
             # ensure subdirs
             path = os.path.realpath(os.path.dirname(lib_file_name))

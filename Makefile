@@ -13,9 +13,9 @@ ifeq ($(BRANCH), master)
 else
 
 ifdef REV_HUMAN
-    REV_FULL=$(REV_PATCH).$(BRANCH)
-else
     REV_FULL=$(REV_PATCH).$(REV_HUMAN)
+else
+    REV_FULL=$(REV_PATCH).$(BRANCH)
 endif
 
 endif

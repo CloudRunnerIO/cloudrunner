@@ -18,6 +18,13 @@
 #    under the License.
 
 import sys
+import os
+
+os_requirements = []
+
+if os.name == 'nt':
+    # Add Windows requirements
+    os_requirements.append('pywin32')
 
 if sys.version_info < (2, 7):
     # 2.6 fix for unit tests
@@ -28,13 +35,6 @@ from distutils.core import setup
 from setuptools import find_packages
 
 from cloudrunner.version import VERSION
-
-os_requirements = []
-
-import os
-if os.name == 'nt':
-    # Add Windows requirements
-    os_requirements.append('pywin32')
 
 requirements = [req.strip() for req in open('requirements.txt').read().split()]
 

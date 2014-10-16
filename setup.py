@@ -18,11 +18,11 @@
 #    under the License.
 
 import sys
-import os
+from os import name as os_name
 
 os_requirements = []
 
-if os.name == 'nt':
+if os_name == 'nt':
     # Add Windows requirements
     os_requirements.append('pywin32')
 

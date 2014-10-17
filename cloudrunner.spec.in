@@ -113,7 +113,6 @@ rm -rf %{buildroot}
 
 %dir %{python_sitelib}/cloudrunner/
 %{python_sitelib}/cloudrunner/tests/
-%{python_sitelib}/cloudrunner/tests/*
 %{python_sitelib}/cloudrunner/__init__*
 %{python_sitelib}/cloudrunner/core
 %{python_sitelib}/cloudrunner/util

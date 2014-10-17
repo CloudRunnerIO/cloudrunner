@@ -131,7 +131,6 @@ then
         /sbin/chkconfig %{name}-node --del sshd
 fi
 
-
 %files node
 %{_bindir}/cloudrunner-node
 

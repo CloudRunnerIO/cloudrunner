@@ -100,7 +100,7 @@ class NodeTransport(TransportBackend):
             try:
                 meta['ID'] = self.node_id
                 meta['SERVER_NAME'] = socket.gethostname()
-                meta['SERVER_IP'] = socket.gethostname()
+                meta['MASTER_IP'] = self.master_pub.partition(':')[0]
 
                 meta['HOST'] = gethostname().lower()
                 meta['OS'] = platform.system()

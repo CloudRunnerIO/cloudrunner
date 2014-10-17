@@ -44,6 +44,10 @@ BASH_VARS = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 LOG = logging.getLogger("StateFunctions")
 
 
+def escape(val):
+    return val.replace('"', '\\"')
+
+
 class Base(object):
 
     def __init__(self, uid, gid, cwd, env):
@@ -256,9 +260,10 @@ class Bash(Base, StatePluginBase):
             for i in range(len(v)):
                 if BASH_VARS.match(k):
                     if len(v) == 1:
-                        prepare_env.append('%s="%s"' % (k, v[i]))
+                        prepare_env.append('%s="%s"' % (k, escape(v[i])))
                     else:
-                        prepare_env.append('%s[%i]="%s"' % (k, i, v[i]))
+                        prepare_env.append('%s[%i]="%s"' %
+                                           (k, i, escape(v[i])))
 
         prepare_env.append("""
 function __exit(){

@@ -35,6 +35,7 @@ VAR_DIR = _var
 CONFIG_DIR = _etc
 
 LIB_DIR = os.path.join(VAR_DIR, "lib")
+TMP_DIR = os.path.join(VAR_DIR, "tmp")
 LOG_DIR = os.path.join(VAR_DIR, "log")
 
 # MASTER CONFIG

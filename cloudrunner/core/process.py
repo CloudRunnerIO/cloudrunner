@@ -46,17 +46,15 @@ from cloudrunner.util.string import stringify, stringify1, jsonify1
 
 if os.name != 'nt':
     from cloudrunner.core.platform.nix import NixProcessor as Executor
-    TEMP_DIR = '/tmp/'
 else:
     from cloudrunner.core.platform.nt import NtProcessor as Executor
-    TEMP_DIR = 'C:\\tmp\\'
 
 LOG = logging.getLogger('ExecProcessor')
 
 
 class Processor(object):
 
-    def __init__(self, as_user, work_dir=TEMP_DIR):
+    def __init__(self, as_user, work_dir=cloudrunner.TMP_DIR):
         self.state_manager = StateManager()
         self.as_user = as_user
         self.session_cwd = os.path.join(work_dir, uuid.uuid4().hex)
@@ -70,7 +68,7 @@ class Processor(object):
         ret_code = -255
 
         if not self.executor.ready:
-            yield [ret_code,  '', '',
+            yield [ret_code, '', '',
                    'Cannot impersonate user %s\n' % self.as_user,
                    env]
             return

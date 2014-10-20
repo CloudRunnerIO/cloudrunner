@@ -25,6 +25,25 @@ SPLITTER = re.compile(r'\s+|,|;')
 LOG = logging.getLogger('Matcher')
 
 
+class CaseInsensitiveDict(dict):
+
+    def __init__(self, dict_):
+        super(CaseInsensitiveDict, self).__init__()
+        all_keys = dict_.keys()
+        for k in all_keys:
+            val = dict_.pop(k)
+            super(CaseInsensitiveDict, self).__setitem__(k.lower(), val)
+
+    def __setitem__(self, key, value, default=None):
+        raise Exception("Dict is readonly")
+
+    def __getitem__(self, key):
+        return super(CaseInsensitiveDict, self).__getitem__(key.lower())
+
+    def __contains__(self, key):
+        return super(CaseInsensitiveDict, self).__contains__(key.lower())
+
+
 class Matcher(object):
 
     """
@@ -33,7 +52,7 @@ class Matcher(object):
 
     def __init__(self, node_id, meta):
         self.node_id = node_id
-        self.meta = meta
+        self.meta = CaseInsensitiveDict(meta)
 
     def is_match(self, target_str):
         targets = SPLITTER.split(target_str)

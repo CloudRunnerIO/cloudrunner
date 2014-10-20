@@ -29,14 +29,16 @@ if os_name == 'nt':
 if sys.version_info < (2, 7):
     # 2.6 fix for unit tests
     # http://bugs.python.org/issue15881#msg170215
-    import multiprocessing
-
+    import multiprocessing  # noqa
+    req_file = 'requirements-py26.txt'
+else:
+    req_file = 'requirements-py27.txt'
 from distutils.core import setup
 from setuptools import find_packages
 
 from cloudrunner.version import VERSION
 
-requirements = [req.strip() for req in open('requirements.txt').read().split()]
+requirements = [req.strip() for req in open(req_file).read().split()]
 
 test_requirements = ['nose>=1.0', 'mock', 'coverage']
 
@@ -82,4 +84,3 @@ setup(
         'Topic :: Software Development :: Libraries :: Python Modules',
     ],
 )
-

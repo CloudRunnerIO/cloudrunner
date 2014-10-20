@@ -1,7 +1,8 @@
 include README.rst
 include MANIFEST.in
 include LICENSE
-include requirements.txt
+include requirements-py26.txt
+include requirements-py27.txt
 
 recursive-include conf *.conf
 recursive-include etc *

@@ -17,7 +17,6 @@ import logging
 import M2Crypto as m
 import os
 import platform
-import psutil
 import random
 import socket
 import stat
@@ -38,6 +37,7 @@ from cloudrunner.util.config import Config
 from cloudrunner.util.decorators import catch_ex
 from cloudrunner.util.net import get_ips
 from cloudrunner.util.shell import colors
+from cloudrunner.util.psutil_wrapper import psutil
 from cloudrunner.util.tlszmq import TLSZmqClientSocket
 from cloudrunner.plugins.transport.base import TransportBackend
 
@@ -95,7 +95,7 @@ class NodeTransport(TransportBackend):
                 pass
 
     def meta(self):
-        if not hasattr(self, '_meta'):
+        if not hasattr(self, '_meta') or not self._meta:
             meta = {}
             try:
                 meta['ID'] = self.node_id
@@ -135,8 +135,7 @@ class NodeTransport(TransportBackend):
                 meta['CRN_VER'] = VERSION
                 self._meta = meta
             except:
-                self._meta = None
-
+                self._meta = {}
         return self._meta
 
     def usage(self):

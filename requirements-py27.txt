@@ -2,5 +2,5 @@ pyzmq
 M2Crypto
 httplib2
 msgpack-python>=0.4
-psutil>=2.0
+psutil
 ipy

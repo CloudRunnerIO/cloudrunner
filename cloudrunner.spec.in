@@ -28,7 +28,7 @@ Requires: python-zmq >= 13.0
 Requires: python-msgpack >= 0.4
 Requires: python-httplib2
 Requires: python-setuptools
-Requires: python-psutil >= 2.0
+Requires: python-psutil
 Requires: python-IPy
 
 %if 0%{?rhel} < 7 && 0%{?fedora} < 13

@@ -17,6 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from collections import OrderedDict
 import logging
 import os
 import re
@@ -86,7 +87,7 @@ class ParseError(Exception):
 class Args(object):
 
     def __init__(self, *args):
-        self._items = {}
+        self._items = OrderedDict()
         for arg in args:
             k, _, v = arg.partition('=')
             k = k.lstrip('-')
@@ -94,6 +95,9 @@ class Args(object):
 
     def get(self, k, default=None):
         return self._items.get(k, default)
+
+    def items(self):
+        return self._items.items()
 
     def __getattr__(self, k, default=None):
         return self._items.get(k, default)

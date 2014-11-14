@@ -327,7 +327,7 @@ class Quit(M):
 
 
 class Term(M):
-    fields = ['dest', 'reason']
+    fields = ['dest', 'reason', 'signal']
 
 
 class Input(M):

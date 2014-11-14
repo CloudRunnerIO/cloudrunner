@@ -426,11 +426,14 @@ class Shell(object):
         self._create_backend()
         if self.args.task == 'list':
             # List hosts
-            mappings = self.backend.host_resolver.mappings()
-            for target, hosts in mappings.items():
-                console.green("[%s]" % target, bold=1)
-                for host in hosts:
-                    console.yellow("%-20s" % host)
+            if self.backend.host_resolver:
+                mappings = self.backend.host_resolver.mappings()
+                for target, hosts in mappings.items():
+                    console.green("[%s]" % target, bold=1)
+                    for host in hosts:
+                        console.yellow("%-20s" % host)
+            else:
+                console.yellow("No host resolver in backend")
         if self.args.task == 'add':
             self.backend.host_resolver.add(self.args.mapping,
                                            self.args.name, self.args.host)

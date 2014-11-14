@@ -108,7 +108,7 @@ class NodeTransport(TransportBackend):
         }
 
         # Run worker threads
-        LOGC.info('Running client in server mode:')
+        LOGC.info('Running client in direct mode')
         LOGC.info("Master socket: %s" % self.master_repl)
         listener = Thread(target=self.listener_device)
         listener.start()
@@ -318,6 +318,9 @@ class NodeTransport(TransportBackend):
 
         subj.CN = kwargs.get("node_id") or self.node_id
         subj.OU = 'DEFAULT'
+        if kwargs.get('tags') and isinstance(kwargs['tags'], list):
+            for tag in kwargs['tags']:
+                subj.GN = tag
 
         req.sign(key, 'sha1')
         assert req.verify(key)

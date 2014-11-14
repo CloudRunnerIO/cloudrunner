@@ -86,12 +86,15 @@ class ParseError(Exception):
 
 class Args(object):
 
-    def __init__(self, *args):
+    def __init__(self, *args, **kwargs):
         self._items = OrderedDict()
         for arg in args:
             k, _, v = arg.partition('=')
             k = k.lstrip('-')
-            self._items.setdefault(k, []).append(v)
+            if not kwargs.get('flatten'):
+                self._items.setdefault(k, []).append(v)
+            else:
+                self._items[k] = v
 
     def get(self, k, default=None):
         return self._items.get(k, default)
@@ -138,7 +141,10 @@ def parse_sections(document):
             sections.append(section)
             target, args = parse_selectors(section.header)
             section.target = target
-            section.args = Args(*shlex.split(args))
+            _args = shlex.split(args)
+            section.args = Args(*filter(lambda x: x.startswith('--'), _args))
+            section.env = Args(*filter(lambda x: not x.startswith('--'),
+                                       _args), flatten=True)
             section.args_string = args
         return sections
     except Exception, exc:

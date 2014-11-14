@@ -27,24 +27,21 @@ import uuid
 
 from cloudrunner.core import parser
 from cloudrunner.core.exceptions import ConnectionError
-from cloudrunner.core.message import StatusCodes
-from cloudrunner.core.message import LocalJobRep
-from cloudrunner.core.message import PipeMessage
-from cloudrunner.core.message import FinishedMessage
+from cloudrunner.core.message import (M, StatusCodes, LocalJobRep,
+                                      PipeMessage, FinishedMessage)
 
 LOG = logging.getLogger('LocalSession')
 
 
 class Session(Thread):
 
-    def __init__(self, ctx, worker_sock_uri, repl_uri, script, run_event,
+    def __init__(self, ctx, worker_sock_uri, repl_uri, msg, run_event,
                  timeout=None, host_resolver=None, **kwargs):
         self.session_id = uuid.uuid4().hex
         self.worker_sock = ctx.socket(zmq.DEALER)
         self.worker_sock.setsockopt(zmq.IDENTITY, self.session_id)
         self.worker_sock.connect(worker_sock_uri)
         self.context = ctx
-        self.script = script
         self.kwargs = kwargs
         self.run_event = run_event
         self.ctx = ctx
@@ -54,11 +51,13 @@ class Session(Thread):
 
         super(Session, self).__init__()
 
-        self.sections = parser.split_sections(script)
+        self.message = M.build(msg)
+        task = self.message.tasks[0]
+        self.sections = parser.split_sections(task['script'])
         if not self.sections:
             raise Exception("Invalid request, no executable sections found")
         self.steps = []
-        self.timeout = timeout or 10
+        self.timeout = task["timeout"] or 10
 
         local_run = self.sections.pop(0)
 

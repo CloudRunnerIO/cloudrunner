@@ -665,6 +665,9 @@ class NodeTransport(TransportBackend):
         else:
             subj.OU = kwargs.get("org") or "DEFAULT"
 
+        if kwargs.get('tags') and isinstance(kwargs['tags'], list):
+            for tag in kwargs['tags']:
+                subj.GN = tag
         req.sign(node_key, 'sha1')
         assert req.verify(node_key)
         assert req.verify(req.get_pubkey())

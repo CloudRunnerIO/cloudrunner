@@ -543,6 +543,10 @@ def _parser():
                            'Default is %(default)s',
                            required=False)
 
+    configure.add_argument('-t', '--tags', nargs='+',
+                           help="Tags associated with node \n"
+                           "(eg. --tags ORD DC1 CLOUD)",
+                           required=False)
     if (CONFIG.user_store):
         register_cli = actions.add_parser('register_cli')
         register_cli.add_argument('-cn', '--common-name',

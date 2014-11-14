@@ -1,10 +1,14 @@
 import msgpack
 import logging
+import os
 import requests
 import time
 
-from cloudrunner.plugins.transport.base import (TransportBackend)
+from cloudrunner import LIB_DIR
 from cloudrunner.core.message import StatusCodes
+from cloudrunner.plugins.transport.base import (TransportBackend)
+from cloudrunner.util.cert_store import CertStore
+from cloudrunner.util.net import HostResolver
 
 LOG = logging.getLogger()
 R_LOG = logging.getLogger("requests")
@@ -329,14 +333,25 @@ class OpQueue(object):
 
 class RESTTransport(TransportBackend):
 
-    mode = 'server'
     config_options = ["node_id", "api_url",
-                      "security.peer_cache", "mode"]
+                      "security.peer_cache", "host_resolver"]
 
     def __init__(self, **kwargs):
         api_url = kwargs.get('api_url') or 'http://127.0.0.1/rest/'
         self.session = requests.Session()
         self.op_queue = OpQueue(self.session, api_url)
+        host_resolver_uri = kwargs.get("host_resolver")
+        if host_resolver_uri:
+            self.host_resolver = HostResolver(host_resolver_uri)
+        else:
+            self.host_resolver = None
+
+        self.peer_cache = kwargs.get("peer_cache")
+        if not self.peer_cache:
+            self.peer_cache = os.path.join(LIB_DIR,
+                                           'cloudrunner-cli',
+                                           'peer_cache.db')
+        self.peer_store = CertStore(self.peer_cache)
 
     def configure(self, overwrite=False, **kwargs):
         pass

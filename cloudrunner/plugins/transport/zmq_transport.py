@@ -30,9 +30,9 @@ import time
 import zmq
 from zmq.eventloop import ioloop
 
-from cloudrunner import CONFIG_SHELL_LOC
-from cloudrunner import LIB_DIR
+from cloudrunner import CONFIG_SHELL_LOC, LIB_DIR
 from cloudrunner.core.exceptions import ConnectionError
+from cloudrunner.core.message import M
 from cloudrunner.plugins.transport.base import (TransportBackend,
                                                 Endpoint,
                                                 Poller)
@@ -272,22 +272,13 @@ class ZmqCliTransport(TransportBackend):
             try:
                 ready = dict(poller.poll(500))
                 if dispatcher in ready:
-                    frames = dispatcher.recv_multipart()
-                    u, a, p, cmd, content, args = frames
-                    kwargs = {}
-                    if args:
-                        try:
-                            kwargs = msgpack.unpackb(args)
-                        except:
-                            pass
+                    frames = dispatcher.recv()
                     try:
-                        assert cmd == 'dispatch'
                         session = Session(self.context,
                                           self.router_uri,
                                           session_worker_uri,
-                                          content, self.stopped,
-                                          host_resolver=self.host_resolver,
-                                          **kwargs)
+                                          frames, self.stopped,
+                                          host_resolver=self.host_resolver)
                         self.sessions[session.session_id] = session
                         self.curr_session = session.session_id
                         session.start()

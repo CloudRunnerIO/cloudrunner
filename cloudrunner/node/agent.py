@@ -118,6 +118,16 @@ class AgentNode(Daemon):
     def configure(self):
         # Run initial configuration
         LOG.info("Running initial configuration")
+        if self.args.mode == "server":
+            CONFIG.update("General", "transport",
+                          "cloudrunner.plugins.transport.zmq_node_transport."
+                          "NodeTransport")
+            CONFIG.reload()
+        elif self.args.mode == "single-mode":
+            CONFIG.update("General", "transport",
+                          "cloudrunner.plugins.transport.node_transport."
+                          "NodeTransport")
+            CONFIG.reload()
         self.backend = self.transport_class.from_config(
             CONFIG, **vars(self.args))
         kwargs = dict(vars(self.args))
@@ -547,6 +557,13 @@ def _parser():
                            help="Tags associated with node \n"
                            "(eg. --tags ORD DC1 CLOUD)",
                            required=False)
+
+    configure.add_argument('--mode', dest='mode',
+                           required=False,
+                           choices=['server', 'single-mode'],
+                           help='Change node mode - `server` or `single-mode`.'
+                           )
+
     if (CONFIG.user_store):
         register_cli = actions.add_parser('register_cli')
         register_cli.add_argument('-cn', '--common-name',

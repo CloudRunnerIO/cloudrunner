@@ -261,9 +261,21 @@ class Shell(object):
         self.backend.configure(overwrite=self.args.overwrite)
 
     def mode(self):
-        if self.args.mode:
-            CONFIG.update('General', 'mode', self.args.mode)
-            CONFIG.reload()
+        if self.args.mode == 'server':
+            CONFIG.update('General', 'mode', 'server')
+            CONFIG.update('General', 'transport',
+                          "cloudrunner.plugins.transport."
+                          "zmq_node_transport.NodeTransport")
+        elif self.args.mode == "single-user":
+            CONFIG.update('General', 'mode', 'single-user')
+            CONFIG.update('General', 'transport',
+                          "cloudrunner.plugins.transport."
+                          "node_transport.NodeTransport")
+        else:
+            print colors.red("Unrecognized option %s" % self.args.mode)
+            return
+
+        CONFIG.reload()
 
     def list_nodes_get(self, command):
         req = self._request()

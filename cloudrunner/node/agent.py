@@ -79,12 +79,17 @@ class AgentNode(Daemon):
         if 'NO_COLORS' in os.environ:
             colors.disable()
 
+        self.load_transport_class()
+        load_plugins(CONFIG)
+
+    def load_transport_class(self):
+        self.transport_class = None
+
         # Defaults to Single-user transport
         transport_class = CONFIG.transport or \
             'cloudrunner.plugins.transport.node_transport.NodeTransport'
 
         (mod, _, klass) = transport_class.rpartition('.')
-        self.transport_class = None
         transport_module = load_plugins_from(mod, [TransportBackend])
         if not transport_module:
             print colors.red("Cannot find module for transport plugin: %s" %
@@ -100,9 +105,6 @@ class AgentNode(Daemon):
                 "Cannot find transport class %s from module %s" % (klass,
                                                                    mod))
             exit(1)
-
-        assert self.transport_class
-        load_plugins(CONFIG)
 
     def choose(self):
         if self.args.action in ['start', 'stop', 'restart']:
@@ -123,11 +125,13 @@ class AgentNode(Daemon):
                           "cloudrunner.plugins.transport.zmq_node_transport."
                           "NodeTransport")
             CONFIG.reload()
+            self.load_transport_class()
         elif self.args.mode == "single-mode":
             CONFIG.update("General", "transport",
                           "cloudrunner.plugins.transport.node_transport."
                           "NodeTransport")
             CONFIG.reload()
+            self.load_transport_class()
         self.backend = self.transport_class.from_config(
             CONFIG, **vars(self.args))
         kwargs = dict(vars(self.args))

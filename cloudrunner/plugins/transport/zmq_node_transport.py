@@ -604,7 +604,7 @@ class NodeTransport(TransportBackend):
             os.makedirs(cert_dir)
 
         key_file = config.security.node_key
-        if os.path.exists(key_file):
+        if not key_file or os.path.exists(key_file):
             if not overwrite:
                 print("Node key file already exists in your config. "
                       "If you want to create new one - run\n"
@@ -616,7 +616,7 @@ class NodeTransport(TransportBackend):
                 return False
 
         crt_file = config.security.node_cert
-        if os.path.exists(crt_file):
+        if not crt_file or os.path.exists(crt_file):
             if not overwrite:
                 print("Node certificate file already exists in your config. "
                       "If you still want to create new one - run\n"

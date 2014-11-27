@@ -413,7 +413,3 @@ class FinishedMessage(M):
               "user", "org", "result", "env"]
 
     type = "FINISHED"
-
-
-class EnvBroadcast(M):
-    fields = ["session_id", "key", "value"]

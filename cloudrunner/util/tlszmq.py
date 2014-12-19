@@ -129,8 +129,8 @@ class TLSZmqServerSocket(object):
             else:
                 return [ident, node, org, resp]
 
+        queue = []
         while True:
-            queue = []
             try:
                 (ident, enc_req, data) = (None, None, None)
                 if queue:
@@ -658,7 +658,7 @@ class _TLSZmq(object):
             return True
         if err:
             self.LOG.warn("SSL Error: [%s] %s" % (err,
-                          (m.m2.err_reason_error_string(err))))
+                                                  (m.m2.err_reason_error_string(err))))
             return False
         return True
 

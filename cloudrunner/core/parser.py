@@ -120,7 +120,7 @@ class Section(object):
 
     def __init__(self):
         self.timeout = None
-        self.args = []
+        self.args = Args()
         self.args_string = ''
         self.header = ""
         self.body = ""

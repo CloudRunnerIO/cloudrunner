@@ -24,7 +24,6 @@ import msgpack
 TOKEN_SEPARATOR = '~~~~~'
 ADMIN_TOWER = '_CTRL'
 HEARTBEAT = '_HB'
-DEFAULT_ORG = 'DEFAULT'
 LOG = logging.getLogger('CR MSG')
 
 LOG.setLevel(logging.ERROR)

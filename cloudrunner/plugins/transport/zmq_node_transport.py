@@ -514,6 +514,9 @@ class NodeTransport(TransportBackend):
                 elif msg.message == 'APPR_FAIL':
                     LOGC.info('Master says: "Certificate approval failed"')
                     return -1
+                elif msg.message == 'QUOTA_FAIL':
+                    LOGC.info('Master says: "Node quota exceeded"')
+                    return -1
                 else:
                     LOGC.info('Master says: "%s"' % msg.message)
                     return -1

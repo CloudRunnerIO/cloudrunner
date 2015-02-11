@@ -62,8 +62,6 @@ setup(
     scripts=['bin/cloudrunner-autocomplete'],
     entry_points={
         "console_scripts": [
-            "cloudrunner = cloudrunner.shell.shell:main",
-            "cloudrunner-exec = cloudrunner.shell.exec:main",
             "cloudrunner-node = cloudrunner.node.agent:main",
         ]
     },

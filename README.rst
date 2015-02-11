@@ -204,7 +204,6 @@ We can also get the currently registered nodes in our account::
 
     >> u'2015-01-28 10:39:44'
 
-
 .. _CloudRunner.IO: http://www.cloudrunner.io
 .. _CloudRunner.IO REST API: http://api.cloudrunner.io/docs
 

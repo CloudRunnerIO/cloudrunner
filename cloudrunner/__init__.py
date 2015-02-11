@@ -47,10 +47,5 @@ CONFIG_NODE_LOCATION = os.environ.get("CLOUDRUNNER_NODE_CONFIG",
                                       os.path.join(_etc,
                                                    'cloudrunner-node.conf'))
 
-# SHELL CONFIG
-CONFIG_SHELL_LOC = os.environ.get("CLOUDRUNNER_SHELL_CONFIG",
-                                  os.path.join(_etc, 'cloudrunner-shell.conf'))
-
-
 NODE_LOG_LOCATION = os.path.join(_var, 'log', 'cloudrunner-node.log')
 LOG_LOCATION = os.path.join(_var, 'log', 'cloudrunner-dsp.log')

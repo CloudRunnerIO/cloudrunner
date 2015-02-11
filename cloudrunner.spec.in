@@ -95,6 +95,7 @@ rm -rf %{buildroot}
 %dir %{python_sitelib}/cloudrunner/
 %{python_sitelib}/cloudrunner/tests/
 %{python_sitelib}/cloudrunner/__init__*
+%{python_sitelib}/cloudrunner/api
 %{python_sitelib}/cloudrunner/core
 %{python_sitelib}/cloudrunner/util
 %{python_sitelib}/cloudrunner/plugins
@@ -114,6 +115,7 @@ fi
 
 %files node
 %{_bindir}/cloudrunner-node
+%{_bindir}/cloudrunner-autocomplete
 
 %{python_sitelib}/cloudrunner/node
 

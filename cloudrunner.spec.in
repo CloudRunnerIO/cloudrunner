@@ -50,22 +50,6 @@ Requires:   %{name} = %{version}-%{release}
 CloudRunner engine for running scripts in cloud environment.
 This package contains node service software.
 
-%package cli
-Summary:    CloudRunner cli
-Group:      Cloud tools
-Requires:   %{name} = %{version}-%{release}
-%description cli
-CloudRunner engine for running scripts in cloud environment.
-This package contains command line tool, which connects to master node,
-(the node where dispatcher package is installed) for managing your IT infrastructure.
-
-#%package heat
-#Summary:    CloudRunner engine for running scripts in cloud environment.
-#This package contains a plugin for Openstack Heat project
-#Group:      Cloud tools
-#Requires:   openstack-heat-engine
-
-
 %prep
 %setup -q
 
@@ -82,15 +66,12 @@ rm -rf %{buildroot}
 
 mkdir -p $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}
 install -m644 conf/cloudrunner-node.conf $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/
-install -m644 conf/cloudrunner-shell.conf $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/
 
 mkdir -p $RPM_BUILD_ROOT/%{_initrddir}
 install -m755 etc/rc.d/init.d/centos/cloudrunner-node $RPM_BUILD_ROOT/%{_initrddir}
 
 sed -i -e 's,{lib_dir},%{python_sitelib},g' $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/cloudrunner-node.conf
 sed -i -e 's,{cert_dir},%{_sharedstatedir}/cloudrunner/certs,g' $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/cloudrunner-node.conf
-sed -i -e 's,{lib_dir},%{python_sitelib},g' $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/cloudrunner-shell.conf
-sed -i -e 's,{var_dir},/var/lib/cloudrunner/,g' $RPM_BUILD_ROOT/%{_sysconfdir}/%{name}/cloudrunner-shell.conf
 
 mkdir -p $RPM_BUILD_ROOT/var/run/cloudrunner/
 mkdir -p $RPM_BUILD_ROOT/var/lib/cloudrunner/
@@ -142,19 +123,10 @@ fi
 
 %dir /var/lib/cloudrunner_node/
 
-%files cli
-%{_bindir}/cloudrunner
-%{_bindir}/cloudrunner-exec
-%{_bindir}/cloudrunner-autocomplete
-
-%{python_sitelib}/cloudrunner/shell
-
-%config(noreplace) %{_sysconfdir}/cloudrunner/cloudrunner-shell.conf
-
-#%files heat
-#TODO
-
 %changelog
+* Wed Feb 11 2015 Tihomir Trifonov <ttrifonov at cloudrunner dot io> - 1.1-1
+- Updated to version 1.1
+
 * Mon Feb 17 2014 Stiliyan Sabchev <ssabchev at cloudrunner dot io> - 0.3-4
 - Clean duplicated directories with main package
 

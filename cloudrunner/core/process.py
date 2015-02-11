@@ -21,9 +21,7 @@ import copy
 import logging
 import os
 import shutil
-import stat
 import tempfile
-import threading
 import uuid
 
 SHEBANG = {
@@ -42,24 +40,21 @@ COMMENT_SYMBOL = {
 }
 
 import cloudrunner
-from cloudrunner.core.message import StatusCodes
 from cloudrunner.core.statemanager import StateManager
 from cloudrunner.core import parser
 from cloudrunner.util.string import stringify, stringify1, jsonify1
 
 if os.name != 'nt':
     from cloudrunner.core.platform.nix import NixProcessor as Executor
-    TEMP_DIR = '/tmp/'
 else:
     from cloudrunner.core.platform.nt import NtProcessor as Executor
-    TEMP_DIR = 'C:\\tmp\\'
 
 LOG = logging.getLogger('ExecProcessor')
 
 
 class Processor(object):
 
-    def __init__(self, as_user, work_dir=TEMP_DIR):
+    def __init__(self, as_user, work_dir=cloudrunner.TMP_DIR):
         self.state_manager = StateManager()
         self.as_user = as_user
         self.session_cwd = os.path.join(work_dir, uuid.uuid4().hex)
@@ -73,7 +68,7 @@ class Processor(object):
         ret_code = -255
 
         if not self.executor.ready:
-            yield [ret_code,  '', '',
+            yield [ret_code, '', '',
                    'Cannot impersonate user %s\n' % self.as_user,
                    env]
             return
@@ -124,7 +119,6 @@ class Processor(object):
                                                           suffix=suffix,
                                                           text=True)
 
-
         os.write(exec_file_fd, command)
         os.close(exec_file_fd)
 
@@ -155,6 +149,9 @@ class Processor(object):
                                         self.session_cwd,
                                         initial_env)
             yield popen
+        except OSError, oserr:
+            LOG.exception(oserr)
+            stderr += '%r' % oserr
         except Exception, ex:
             LOG.exception(ex)
             stderr += '%r' % ex
@@ -171,15 +168,14 @@ class Processor(object):
             if k in new_env:
                 new_env.pop(k)
 
-        shutil.rmtree(self.session_cwd, True)
         yield [self.executor.as_user, ret_code, stdout, stderr, new_env]
 
-    def add_libs(self, name, source, **kwargs):
+    def clean(self):
+        shutil.rmtree(self.session_cwd, True)
+
+    def add_libs(self, name, source):
         try:
             lib_file_name = os.path.join(self.session_cwd, name)
-            if bool(kwargs.get("inline")):
-                # inline include
-                return source
             # Save
             # ensure subdirs
             path = os.path.realpath(os.path.dirname(lib_file_name))

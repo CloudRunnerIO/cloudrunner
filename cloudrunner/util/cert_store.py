@@ -34,7 +34,7 @@ class CertStore(object):
     def reload(self):
         try:
             f = open(self.store_fn, 'r')
-        except Exception, ex:
+        except Exception:
             if not os.path.exists(self.store_fn):
                 if not os.path.exists(os.path.dirname(self.store_fn)):
                     os.makedirs(os.path.dirname(self.store_fn))
@@ -67,6 +67,9 @@ class CertStore(object):
         for (_c, _f) in self._store:
             if _c == cn and _f == fp:
                 return True
+
+    def __iter__(self):
+        return iter(self._store)
 
     def insert(self, common_name, fingerprint):
         access_key = "%s%s%s" % (common_name, self.SEP, fingerprint)

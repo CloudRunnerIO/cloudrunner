@@ -16,19 +16,17 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-import abc
-
-import json
-import time
-
-from cloudrunner.util.string import stringify1
+import logging
+import msgpack
 
 # Requests
 
 TOKEN_SEPARATOR = '~~~~~'
-ADMIN_TOWER = 'cloudrunner-control'
-HEARTBEAT = 'cloudrunner-heartbeat'
-DEFAULT_ORG = 'DEFAULT'
+ADMIN_TOWER = '_CTRL'
+HEARTBEAT = '_HB'
+LOG = logging.getLogger('CR MSG')
+
+LOG.setLevel(logging.ERROR)
 
 
 class StatusCodes(object):
@@ -57,11 +55,81 @@ class StatusCodes(object):
 def is_valid_host(host):
     if not host:
         return False
-    return not filter(lambda x: x.lower() == host.lower(),
-                     (ADMIN_TOWER.lower(), HEARTBEAT.lower()))
+    return not filter(lambda x: x.lower() == host.lower(), (
+        ADMIN_TOWER.lower(), HEARTBEAT.lower()))
 
 
-class BaseMessage(object):
+class DictWrapper(dict):
+
+    def __getattr__(self, item):
+        if item in self.keys():
+            return self[item]
+        else:
+            raise IndexError(item)
+
+    def __setattr__(self, item, value):
+        self[item] = value
+
+
+class SafeDictWrapper(dict):
+
+    def __getattr__(self, item):
+        if item in self.keys():
+            return self[item]
+        else:
+            return ''
+
+    def __setattr__(self, item, value):
+        self[item] = value
+
+
+class MsgType(type):
+
+    def __init__(cls, name, bases, dct):
+        if not hasattr(cls, 'registry'):
+            # this is the base class.  Create an empty registry
+            cls.registry = {}
+        else:
+            # this is a derived class.  Add cls to the registry
+            interface_id = name.upper()
+            cls.registry[interface_id] = cls
+
+        super(MsgType, cls).__init__(name, bases, dct)
+
+    def __call__(cls, *args, **kwargs):
+        values = list(args)
+        if cls is M:
+            # Generic call
+            msg_name = kwargs.get('c')
+            if not msg_name:
+                msg_name = values.pop(0)
+            msg_name = msg_name.upper()
+            cls = cls.registry[msg_name]
+        obj = super(MsgType, cls).__call__()
+        obj.kw = []
+        obj.hdr = SafeDictWrapper()
+
+        for i, field in enumerate(obj.fields):
+            if i >= len(values):
+                break
+            if hasattr(obj, 'mod_' + field):
+                v = getattr(obj, 'mod_' + field)(values[i])
+            else:
+                v = values[i]
+            setattr(obj, field, v)
+        for field, value in kwargs.items():
+            obj.kw.append(field)
+            if hasattr(obj, 'mod_' + field):
+                v = getattr(obj, 'mod_' + field)(value)
+            else:
+                v = value
+            setattr(obj, field, v)
+        return obj
+
+
+class M(object):
+    __metaclass__ = MsgType
+    dest = ''
 
     def _str(self, value):
         if isinstance(value, unicode):
@@ -72,315 +140,281 @@ class BaseMessage(object):
     def __str__(self):
         return str(vars(self).items())
 
+    def __repr__(self):
+        return str(vars(self))
+
+    @property
+    def control(self):
+        return self.__class__.__name__.upper()
+
+    def values(self):
+        d = dict((f, getattr(self, f, ''))
+                 for f in self.fields + self.kw)
+        d['c'] = self.control
+        return d
+
+    def pack(self):
+        if hasattr(self, 'dest') and not self.hdr.dest:
+            self.hdr.dest = self.dest
+        return msgpack.packb(self.hdr) + msgpack.packb(self.values())
+
+    _ = property(pack)
+
+    def header(self, **kw):
+        self.hdr = SafeDictWrapper(kw)
+
     @classmethod
-    def build(cls, *args):
+    def set_header(cls, packed, header):
+        p = msgpack.Unpacker()
+        p.feed(packed)
+        data = []
+        while True:
+            try:
+                hdr = p.unpack()
+                hdr.update(header)
+                data.append(msgpack.packb(hdr))
+                p.skip(lambda p: data.append(p))
+            except msgpack.OutOfData:
+                break
+        return ''.join(data)
+
+    @classmethod
+    def pop_header(cls, packed):
+        p = msgpack.Unpacker()
+        p.feed(packed)
+        plain_data = ''
+        hdr = SafeDictWrapper()
+        while True:
+            try:
+                clean_hdr = p.unpack()
+                data = []
+                for k in ['ident', 'peer', 'org']:
+                    hdr[k] = clean_hdr.pop(k, '')
+                p.skip(lambda p: data.append(p))
+                plain_data = msgpack.packb(clean_hdr) + data[0]
+            except msgpack.OutOfData:
+                break
+        return hdr, plain_data
+
+    @classmethod
+    def parse(cls, packed):
+        p = msgpack.Unpacker()
+        p.feed(packed)
+        msgs = []
+        while True:
+            try:
+                hdr = p.unpack()
+                data = []
+                p.skip(lambda p: data.append(p))
+                obj = MsgWrapper(hdr, data[0])
+                obj.hdr = SafeDictWrapper(hdr)
+                msgs.append(obj)
+            except msgpack.OutOfData:
+                break
+            except Exception, ex:
+                LOG.exception(ex)
+                LOG.error(packed)
+                break
+        return msgs
+
+    @classmethod
+    def build(cls, packed):
         try:
-            obj = cls(*args)
+            p = msgpack.Unpacker()
+            p.feed(packed)
+            hdr = p.unpack()
+            kwargs = p.unpack()
+            obj = cls(**kwargs)
+            obj.hdr = SafeDictWrapper(hdr)
             return obj
-        except Exception, ex:
+        except msgpack.OutOfData:
+            LOG.error("Corrupted packet %s" % packed)
             return False
 
 
-class AgentReq(BaseMessage):
+class MsgWrapper(object):
 
-    def __init__(self, login=None, auth_type=1, password=None, control=None,
-                 data=None, extra_json=None):
-        self.login = self._str(login)
-        self.password = self._str(password)
-        #assert self.password
-        self.auth_type = int(auth_type)
-        self.control = self._str(control)
-        if data:
-            self.data = self._str(data)
-        else:
-            self.data = data
-        self.kwargs = {}
-        if extra_json:
-            self.kwargs = json.loads(extra_json)
+    def __init__(self, header, packed):
+        self.hdr = SafeDictWrapper(header)
+        self.packed = packed
 
-    def append(self, **kwargs):
-        for k, v in kwargs.items():
-            if hasattr(self, k):
-                setattr(self, k, self._str(v))
-            else:
-                self.kwargs[k] = self._str(v)
+    def __repr__(self):
+        return self._
 
     def pack(self):
-        return [
-            self.login, str(self.auth_type), self.password, self.control,
-            self.data or '', json.dumps(self.kwargs)]
+        return msgpack.packb(self.hdr) + self.packed
+
+    _ = property(pack)
+
+    def route(self):
+        return [getattr(self.hdr, 'dest'), self.pack()]
 
 
-class ScheduleReq(BaseMessage):
+class Dispatch(M):
 
-    def __init__(self, control, job_id):
-        self.control = self._str(control)
-        self.job_id = self._str(job_id)
-
-    def pack(self):
-        return [self.control, self.job_id]
+    dest = ''
+    fields = ["user", "roles", "tasks", "includes", "attachments", "env",
+              "disabled_nodes"]
 
 
-class HeartBeatReq(BaseMessage):
+class GetNodes(M):
 
-    """
-    \x00k\x01, node_id, Org, ACTION
-    """
-
-    def __init__(self, ident, peer, org, control, *args):
-        self.ident = ident
-        self.peer = peer
-        self.org = org
-        self.control = control
+    dest = ''
+    fields = ["org"]
 
 
-class FwdReq(BaseMessage):
+class Nodes(M):
 
-    """
-    ident, json_packet
-    """
-
-    def __init__(self, ident, datagram, *args):
-        self.ident = ident
-        self.data = json.loads(datagram)
+    dest = ''
+    fields = ["nodes"]
 
 
-class ClientReq(BaseMessage):
+class Queued(M):
 
-    def __init__(self, ident, peer, org, datagram):
-        self.ident = ident
-        self.peer = peer
-        self.org = org
-        if datagram:
-            try:
-                data = json.loads(datagram)
-            except ValueError:
-                data = None
-        if data:
-            if len(data) > 1:
-                self.dest = str(data[0])
-                self.control = str(data[1])
-                if len(data) > 2:
-                    self.data = str(data[2])
-                else:
-                    self.data = None
-                if len(data) > 3:
-                    self.extra = str(data[3])
-                else:
-                    self.extra = None
-            else:
-                self.control = str(data[0])
-                self.dest = None
-                self.data = None
-                self.extra = None
-        else:
-            self.dest = None
-            self.control = None
-            self.data = None
-            self.extra = None
+    dest = ''
+    fields = ["task_ids"]
 
 
-class RerouteReq(BaseMessage):
+class Error(M):
 
-    def __init__(self, req):
-        self.dest = req.dest
-        self.ident = req.ident
-        self.org = req.org
-        self.peer = req.peer
-        self.control = req.control
-        self.data = req.data
-        self.extra = req.extra
-
-    def pack(self):
-        packed = [str(self.dest), str(self.ident), self.peer or '',
-                  str(self.org), str(self.control), self.data or '']
-        if self.extra:
-            packed.append(self.extra)
-
-        return packed
+    dest = ''
+    fields = ["msg", "code"]
 
 
-class ControlReq(BaseMessage):
+class Fwd(M):
 
-    def __init__(self, ident, peer, org, control, node, data=None, extra=None):
-        self.ident = ident
-        self.peer = peer
-        self.org = org
-        self.control = control
-        self.node = node
-        self.data = None
-        self.extra = None
-        if data:
-            self.data = data
-        if extra:
-            self.extra = extra
+    fields = ['fwd_data']
+
+
+class Ident(M):
+
+    dest = HEARTBEAT
+    fields = ['meta']
+
+
+class Welcome(M):
+
+    dest = ''
+    fields = []
+
+
+class Reload(M):
+
+    dest = ''
+    fields = []
+
+
+class HB(M):
+
+    dest = HEARTBEAT
+    fields = []
+
+
+class HBR(M):
+
+    dest = HEARTBEAT
+    fields = ['node', 'usage']
+
+
+class Ping(M):
+
+    dest = HEARTBEAT
+    fields = []
+
+
+class Init(M):
+    fields = ['org_id', 'org_name', 'session_key', 'session_iv']
+
+
+class Quit(M):
+    dest = HEARTBEAT
+    fields = ['peer']
+
+
+class Term(M):
+    fields = ['dest', 'reason', 'signal']
+
+
+class Input(M):
+    fields = ['dest', 'cmd', 'data']
+
+
+class Crypto(M):
+    dest = ''
+    fields = ['message']
+
+
+class JobTarget(M):
+    dest = ''
+    fields = ['job_id', 'targets']
 
 # Replies
 
 
-class RegisterRep(BaseMessage):
-
-    def __init__(self, frames):
-        self.reply = frames[0]
-        if len(frames) >= 1:
-            self.data = frames[1]
-        else:
-            self.data = ''
+class Register(M):
+    dest = ADMIN_TOWER
+    fields = ['node', 'data', 'meta']
 
 
-class ClientRep(BaseMessage):
-
-    def __init__(self, ident, peer, dest, control, *args):
-        self.ident = ident
-        self.peer = peer
-        self.dest = dest
-        self.control = control
-        if args:
-            self.data = args[0]
-            self.extra = args[1:]
-        else:
-            self.data = ''
-            self.extra = None
-
-    def pack(self):
-        if self.extra:
-            return [self.ident, json.dumps([self.dest, self.control,
-                                            self.data, self.extra])]
-        else:
-            return [self.ident,
-                    json.dumps([self.dest, self.control, self.data])]
+class Control(M):
+    fields = ['node', 'status', 'message']
 
 
-class JobRep(BaseMessage):
-
-    def __init__(self, ident, peer, org, control, run_as=None, data=None, *args):
-        self.ident = ident
-        self.peer = peer
-        self.org = org
-        self.control = control
-
-        self.run_as = run_as
-        try:
-            self.data = json.loads(data)
-        except:
-            self.data = None
-        if args:
-            self.extra = list(args)
+class StdOut(M):
+    fields = ['dest', 'job_id', 'run_as', 'output']
 
 
-class LocalJobRep(BaseMessage):
-
-    def __init__(self, job_id, peer, control, run_as=None, data=None, *args):
-        self.job_id = job_id
-        self.peer = peer
-        self.control = control
-
-        self.run_as = run_as
-        try:
-            self.data = json.loads(data)
-        except:
-            self.data = None
-        if args:
-            self.extra = list(args)
+class StdErr(M):
+    fields = ['dest', 'job_id', 'run_as', 'output']
 
 
-class JobInput(BaseMessage):
-
-    def __init__(self, _, cmd, job_id, user, org,
-                 data=None, targets=None, *args):
-        self.cmd = cmd
-        self.job_id = job_id
-        self.user = user
-        self.org = org
-        self.data = data
-        self.targets = targets
+class FileExport(M):
+    fields = ['dest', 'job_id', 'file_name', 'content']
 
 
-class TransportMessage(object):
-    __metaclass__ = abc.ABCMeta
-
-    pack_order = []
-    unpack_functions = {}
-
-    def default_packer(self, val):
-        return stringify1(val)
-
-    def pack(self, proxy, peer):
-        # reply: 'PIPE', job_id, run_as, node_id, stdout, stderr
-        # reply-fwd: session_id, PIPEOUT, session_id, time,
-        #   task_name, user, targets, tags, job_id, run_as,
-        #   node_id, stdout, stderr
-
-        data = [self.status, str(int(time.time()))]
-        for field_name in self.pack_order:
-            val = getattr(self, field_name)
-            packed_val = getattr(self, "pack_%s" % field_name,
-                                 self.default_packer)(val)
-            data.append(packed_val)
-
-        return [proxy, peer] + [json.dumps(data)]
-
-    @classmethod
-    def unpack(cls, status, timestamp, *args):
-        """ Build the proper message from frames+
-        """
-        target_klass = None
-
-        for klass in cls.__subclasses__():
-            if klass.status == status:
-                target_klass = klass
-
-        if target_klass is None:
-            return None
-
-        msg_kwargs = {}
-        for idx, field_name in enumerate(target_klass.pack_order):
-            val = args[idx]
-            unpack_function = target_klass.unpack_functions.get(field_name,
-                                                                lambda x: x)
-            msg_kwargs[field_name] = unpack_function(val)
-
-        return target_klass(**msg_kwargs)
+class Finished(M):
+    fields = ['dest', 'job_id', 'run_as', 'result']
 
 
-class PipeMessage(TransportMessage):
+class Events(M):
+    fields = ['dest', 'job_id', 'run_as', 'result']
+
+
+class Job(M):
+    fields = ['job_id', 'remote_user', 'request']
+
+
+class LocalJobRep(M):
+
+    fields = ['dest', 'job_id', 'peer', 'control', 'run_as', 'data']
+
+# Node
+
+
+class Ready(M):
+    run_as = ''
+    fields = ['dest', 'status']
+
+# Transport
+
+
+class InitialMessage(M):
+    status = StatusCodes.STARTED
+    type = "INITIAL"
+    fields = ["type", "session_id", "ts", "org", "user", "seq_no"]
+
+
+class PipeMessage(M):
     status = StatusCodes.PIPEOUT
-    pack_order = ["session_id", "task_name", "user", "org", "targets",
-                  "tags", "job_id", "run_as", "node", "stdout", "stderr"]
+    fields = ["type", "session_id", "ts", "seq_no", "org",
+              "user", "run_as", "node", "stdout", "stderr"]
 
-    def __init__(self, session_id, task_name, user, org, targets, tags,
-                 job_id, run_as, node, stdout=None, stderr=None):
-        self.session_id = session_id
-        self.task_name = task_name
-        self.user = user
-        self.org = org
-        self.targets = targets
-        self.tags = tags
-        self.job_id = job_id
-        self.run_as = run_as
-        self.node = node
-        self.stdout = stdout
-        self.stderr = stderr
+    type = "PARTIAL"
 
 
-class FinishedMessage(TransportMessage):
+class FinishedMessage(M):
     status = StatusCodes.FINISHED
-    pack_order = ["session_id", "task_name", "user", "org",
-                  "tags", "script", "response"]
+    fields = ["type", "session_id", "ts",
+              "user", "org", "result", "env"]
 
-    unpack_functions = {
-        "response": json.loads,
-    }
-
-    def __init__(self, session_id, task_name, user, org, tags,
-                 script, response):
-        self.session_id = session_id
-        self.task_name = task_name
-        self.user = user
-        self.org = org
-        self.tags = tags
-        self.script = script
-        self.response = response
-
-    def pack_response(self, resp):
-        return json.dumps(resp)
+    type = "FINISHED"

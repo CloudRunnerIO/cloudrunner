@@ -20,27 +20,6 @@
 import abc
 
 
-class ArgsProvider(object):
-
-    __metaclass__ = abc.ABCMeta
-
-    @abc.abstractmethod
-    def append_args(self, arg_parser):
-        pass
-
-class CliArgsProvider(object):
-
-    __metaclass__ = abc.ABCMeta
-
-    @abc.abstractmethod
-    def append_cli_args(self, arg_parser):
-        pass
-
-    @abc.abstractmethod
-    def call(self, user_id, data, args, ctx):
-        pass
-
-
 class ManagedPlugin(object):
     __metaclass__ = abc.ABCMeta
 

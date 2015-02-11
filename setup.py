@@ -17,27 +17,28 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import os
-import shutil
 import sys
+from os import name as os_name
+
+os_requirements = []
+
+if os_name == 'nt':
+    # Add Windows requirements
+    os_requirements.append('pywin32')
 
 if sys.version_info < (2, 7):
     # 2.6 fix for unit tests
     # http://bugs.python.org/issue15881#msg170215
-    import multiprocessing
-
+    import multiprocessing  # noqa
+    req_file = 'requirements-py26.txt'
+else:
+    req_file = 'requirements-py27.txt'
 from distutils.core import setup
 from setuptools import find_packages
 
 from cloudrunner.version import VERSION
 
-os_requirements = []
-
-if os.name == 'nt':
-    # Add Windows requirements
-    os_requirements.append('pywin32')
-
-requirements = [req.strip() for req in open('requirements.txt').read().split()]
+requirements = [req.strip() for req in open(req_file).read().split()]
 
 test_requirements = ['nose>=1.0', 'mock', 'coverage']
 

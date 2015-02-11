@@ -67,6 +67,9 @@ class ConfigBase(Mapper):
     def add_section(self, name, section_name):
         setattr(self, name, self.Section(self._config, section_name))
 
+    def has_section(self, section_name):
+        return self._config.has_section(section_name)
+
     def __str__(self):
         return "Config(%s)" % self._fn
 
@@ -105,6 +108,6 @@ class Config(ConfigBase):
 
     def configure(self):
         self.add_section("security", "Security")
-        self.add_section("users", "Users")
         self.add_section("plugins", "Plugins")
         self.add_section("run_as", "Run_as")
+        self.add_section("logging", "Logging")

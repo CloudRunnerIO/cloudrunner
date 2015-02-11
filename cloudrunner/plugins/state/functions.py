@@ -22,7 +22,6 @@ import logging
 import os
 import platform
 import re
-import stat
 import tempfile
 
 from cloudrunner.plugins.state.base import StatePluginBase
@@ -43,6 +42,10 @@ DISABLED_ENV = SPECIAL + ('_', 'PIPESTATUS', ENV_FILE_NAME,
 KEY_RE = re.compile(r'^\S*$', re.S)
 BASH_VARS = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
 LOG = logging.getLogger("StateFunctions")
+
+
+def escape(val):
+    return val.replace('"', '\\"')
 
 
 class Base(object):
@@ -218,14 +221,16 @@ class Sh(Base, StatePluginBase):
             for i in range(len(v)):
                 if BASH_VARS.match(k):
                     if len(v) == 1:
-                        prepare_env.append('%s="%s"' % (k, v[i]))
+                        prepare_env.append('%s="%s"' % (k, escape(v[i])))
                     else:
-                        prepare_env.append('%s[%i]="%s"' % (k, i, v[i]))
+                        prepare_env.append('%s[%i]="%s"' %
+                                           (k, i, escape(v[i])))
 
         prepare_env.append("""
 function __exit(){
   readonly ___ENV2___=$(set)
-  awk 'FNR==NR{old[$0];next};!($0 in old)' <(echo \"$___ENV___\") <(echo \"$___ENV2___\") > $%(env_var)s
+  awk 'FNR==NR{old[$0];next};!($0 in old)' <(echo \"$___ENV___\") """
+                           """<(echo \"$___ENV2___\") > $%(env_var)s
   exit $1
 }
 readonly ___ENV___=$(set)
@@ -256,9 +261,10 @@ class Bash(Base, StatePluginBase):
             for i in range(len(v)):
                 if BASH_VARS.match(k):
                     if len(v) == 1:
-                        prepare_env.append('%s="%s"' % (k, v[i]))
+                        prepare_env.append('%s="%s"' % (k, escape(v[i])))
                     else:
-                        prepare_env.append('%s[%i]="%s"' % (k, i, v[i]))
+                        prepare_env.append('%s[%i]="%s"' %
+                                           (k, i, escape(v[i])))
 
         prepare_env.append("""
 function __exit(){
@@ -442,7 +448,7 @@ class PowerShell(StatePluginBase):
 
 def __enter(_env):
     import os
-    env = json.loads(_env)
+    env = json.loads(_env.replace("\n", "\\n"))
     for k, v in env.items():
         if k == ENV_FILE_NAME:
             os.environ[k] = env[ENV_FILE_NAME]
@@ -464,7 +470,8 @@ def __exit(exit_code):
     __env__new__items = environ.items()
     global __env__old__items
     k_v = [(k, v)
-           for (k, v) in __env__new__items if (k, v) not in __env__old__items]
+           for (k, v) in __env__new__items
+           if (k, v) not in __env__old__items]  # noqa
     __env__file = open(environ[ENV_FILE_NAME], 'w')
     for k, v in k_v:
         __env__file.write('%s=%s\n' % (k, json.dumps(v)))

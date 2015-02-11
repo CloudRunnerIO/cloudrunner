@@ -17,7 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import json
+import msgpack
 import logging
 import M2Crypto as m
 import os
@@ -30,20 +30,13 @@ from threading import Event
 import time
 import zmq
 from zmq.eventloop import ioloop
-import uuid
 
-from cloudrunner.core.message import *
-from cloudrunner.util.shell import colors
+from cloudrunner.core.message import *  # noqa
 from cloudrunner.util.string import stringify
 
-import logging
-import zmq
-from zmq.eventloop import ioloop
 
 from cloudrunner import LIB_DIR
 from cloudrunner import CONFIG_NODE_LOCATION
-from cloudrunner.core.message import (ADMIN_TOWER, HEARTBEAT)
-from cloudrunner.core.exceptions import ConnectionError
 from cloudrunner.plugins.transport.base import TransportBackend
 from cloudrunner.plugins.transport.zmq_transport import (SockWrapper,
                                                          PollerWrapper)
@@ -86,6 +79,9 @@ class NodeTransport(TransportBackend):
             user_store = os.path.join(LIB_DIR, 'cloudrunner', 'user_store.db')
         self.user_store = CertStore(user_store)
 
+    def meta(self):
+        return {}
+
     def loop(self):
         ioloop.IOLoop.instance().start()
 
@@ -103,7 +99,6 @@ class NodeTransport(TransportBackend):
             req_queue_uri = 'inproc://req-queue.sock'
             job_queue_uri = 'inproc://job-queue.sock'
             ssl_proxy_uri = 'inproc://ssl-proxy-uri'
-            #control_uri = 'ipc://%s/control-queue.sock' % sock_dir
 
         self.buses = {
             'requests': ['', req_queue_uri],
@@ -113,7 +108,7 @@ class NodeTransport(TransportBackend):
         }
 
         # Run worker threads
-        LOGC.info('Running client in server mode:')
+        LOGC.info('Running client in direct mode')
         LOGC.info("Master socket: %s" % self.master_repl)
         listener = Thread(target=self.listener_device)
         listener.start()
@@ -145,8 +140,8 @@ class NodeTransport(TransportBackend):
                 try:
                     self.ssl_socket.start()  # Start TLSZMQ server socket
                 except zmq.ZMQError, zerr:
-                    if zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
-                        or zerr.errno == zmq.ENOTSOCK:
+                    if (zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP
+                            or zerr.errno == zmq.ENOTSOCK):
                         # System interrupt
                         break
                 except KeyboardInterrupt:
@@ -225,13 +220,14 @@ class NodeTransport(TransportBackend):
                     peer = session_map.get(frames.pop(0)) or ''
                     if peer:
                         frames.insert(1, self.node_id)
-                        dispatcher.send_multipart([peer, json.dumps(frames)])
+                        dispatcher.send_multipart(
+                            [peer, msgpack.packb(frames)])
             except KeyboardInterrupt:
                 LOGC.info('Exiting node listener thread')
                 break
             except zmq.ZMQError, zerr:
-                if zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
-                    or zerr.errno == zmq.ENOTSOCK:
+                if (zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP
+                        or zerr.errno == zmq.ENOTSOCK):
                     break
                 LOGC.exception(zerr)
                 LOGC.error(zerr.errno)
@@ -322,6 +318,9 @@ class NodeTransport(TransportBackend):
 
         subj.CN = kwargs.get("node_id") or self.node_id
         subj.OU = 'DEFAULT'
+        if kwargs.get('tags') and isinstance(kwargs['tags'], list):
+            for tag in kwargs['tags']:
+                subj.GN = tag
 
         req.sign(key, 'sha1')
         assert req.verify(key)

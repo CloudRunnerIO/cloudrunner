@@ -1,4 +1,4 @@
 [gerrit]
-host=gerrit.stg.cloudrunner.io
+host=gerrit.cloudrunner.io
 port=29418
 project=cloudrunner

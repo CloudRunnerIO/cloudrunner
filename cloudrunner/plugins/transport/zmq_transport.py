@@ -17,7 +17,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import json
+import msgpack
 import logging
 import M2Crypto as m
 import os
@@ -30,10 +30,8 @@ import time
 import zmq
 from zmq.eventloop import ioloop
 
-from cloudrunner import CONFIG_SHELL_LOC
-from cloudrunner import LIB_DIR
+from cloudrunner import CONFIG_SHELL_LOC, LIB_DIR
 from cloudrunner.core.exceptions import ConnectionError
-from cloudrunner.core import parser
 from cloudrunner.plugins.transport.base import (TransportBackend,
                                                 Endpoint,
                                                 Poller)
@@ -54,8 +52,9 @@ class ZmqCliTransport(TransportBackend):
     proto = 'zmq+ssl'
     config_options = ["node_id", "master_pub", "master_repl",
                       "worker_count", "sock_dir", "security.server",
-                      "security.ssl_cert",  "security.ssl_key", "host_resolver",
-                      "security.cert_pass", "security.peer_cache", "mode"]
+                      "security.ssl_cert", "security.ssl_key",
+                      "host_resolver", "security.cert_pass",
+                      "security.peer_cache", "mode"]
 
     def __init__(self, mode=None, dispatcher_uri=None, **kwargs):
         self.mode = mode or self.MODE_LOCAL
@@ -106,8 +105,8 @@ class ZmqCliTransport(TransportBackend):
     def prepare(self):
         LOGC.debug("Starting ZMQ Transport")
 
-        if self.mode == self.MODE_LOCAL and \
-            not (self.ssl_cert and self.ssl_key):
+        if (self.mode == self.MODE_LOCAL and
+                not (self.ssl_cert and self.ssl_key)):
             print("Client is not configured. Run with\n"
                   "\tcloudrunner-exec configure\n"
                   "to perform initial configuration, or manually edit the "
@@ -126,8 +125,6 @@ class ZmqCliTransport(TransportBackend):
 
     def _ssl_socket_device(self, context):
         LOGC.debug("Starting new SSL thread")
-        args = []
-        kwargs = {}
 
         ssl_socket = TLSZmqClientSocket(self.context,
                                         self.dispatcher_uri,
@@ -189,8 +186,9 @@ class ZmqCliTransport(TransportBackend):
                 fprint = x509.get_fingerprint('sha1')
 
                 if (cn, fprint) not in self.peer_store:
-                    LOGC.warn("Adding new peer certificate into cache(%s:%s)" %
-                             (cn, fprint))
+                    LOGC.warn(
+                        "Adding new peer certificate into cache(%s:%s)" % (
+                            cn, fprint))
                     if not self.peer_store.insert(cn, fprint):
                         return False
                 else:
@@ -273,22 +271,13 @@ class ZmqCliTransport(TransportBackend):
             try:
                 ready = dict(poller.poll(500))
                 if dispatcher in ready:
-                    frames = dispatcher.recv_multipart()
-                    u, a, p, cmd, content, args = frames
-                    kwargs = {}
-                    if args:
-                        try:
-                            kwargs = json.loads(args)
-                        except:
-                            pass
+                    frames = dispatcher.recv()
                     try:
-                        assert cmd == 'dispatch'
                         session = Session(self.context,
                                           self.router_uri,
                                           session_worker_uri,
-                                          content, self.stopped,
-                                          host_resolver=self.host_resolver,
-                                          **kwargs)
+                                          frames, self.stopped,
+                                          host_resolver=self.host_resolver)
                         self.sessions[session.session_id] = session
                         self.curr_session = session.session_id
                         session.start()
@@ -297,7 +286,7 @@ class ZmqCliTransport(TransportBackend):
 
                 if worker in ready:
                     frames = worker.recv_multipart()
-                    data = json.loads(frames[2])
+                    data = msgpack.unpackb(frames[2])
                     if frames[0] != self.curr_session:
                         continue
                     if len(data) > 4 and data[0] != 'FINISHED':
@@ -305,7 +294,7 @@ class ZmqCliTransport(TransportBackend):
                         dispatcher.send_multipart(list(stringify(*data)))
                     else:
                         dispatcher.send_multipart(list(stringify(*data)))
-            except zmq.ZMQError, zerr:
+            except zmq.ZMQError:
                 break
 
         LOGC.debug("Exiting local dispatcher")
@@ -382,9 +371,8 @@ class ZmqCliTransport(TransportBackend):
     def configure(self, overwrite=False, **kwargs):
         config = Config(CONFIG_SHELL_LOC)
 
-        if config.security.ssl_cert and \
-            os.path.exists(config.security.ssl_cert) and \
-            not overwrite:
+        if (config.security.ssl_cert and
+                os.path.exists(config.security.ssl_cert) and not overwrite):
             print("Current configuration already exists. "
                   "Use the --overwrite "
                   "option to create new configuration")
@@ -406,8 +394,6 @@ class ZmqCliTransport(TransportBackend):
             host_resolver_file = os.path.join(conf_dir, 'host_resolver.conf')
             try:
                 # Create
-                resolver = HostResolver(host_resolver_file)
-                resolver.add('#host_name', "127.0.0.1:12345")
                 config.update("General",
                               "host_resolver",
                               host_resolver_file)
@@ -432,7 +418,7 @@ class ZmqCliTransport(TransportBackend):
         subj = req.get_subject()
         subj.CN = gethostname()
 
-        #req.sign(key, 'sha1')
+        # req.sign(key, 'sha1')
 
         # Self-sign the certificate
         x509 = m.X509.X509()
@@ -485,7 +471,7 @@ class SockWrapper(Endpoint):
     def __repr__(self):
         return self.endpoint
 
-    def __strstr__(self):
+    def __str__(self):
         return "SocketWrapper<%s>" % self.endpoint
 
     def fd(self):
@@ -493,13 +479,20 @@ class SockWrapper(Endpoint):
 
     def send(self, *frames):
         try:
-            self._sock.send_multipart([str(f) for f in frames])
+            if len(frames) == 1:
+                if isinstance(frames[0], list):
+                    self._sock.send_multipart(frames[0])
+                else:
+                    self._sock.send(frames[0])
+            else:
+                self._sock.send_multipart(list(frames))
         except zmq.ZMQError, zerr:
             if self._sock.context.closed or \
                     zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
-                or zerr.errno == zmq.ENOTSOCK:
+                    or zerr.errno == zmq.ENOTSOCK:
                 # System interrupt
                 raise ConnectionError()
+            LOGC.error(zerr)
 
     def recv(self, timeout=None):
         try:
@@ -517,7 +510,7 @@ class SockWrapper(Endpoint):
         except zmq.ZMQError, zerr:
             if self._sock.context.closed or \
                     zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
-                or zerr.errno == zmq.ENOTSOCK:
+                    or zerr.errno == zmq.ENOTSOCK:
                 # System interrupt
                 raise ConnectionError()
 
@@ -533,7 +526,7 @@ class SockWrapper(Endpoint):
                     raise Unauthorized()
                 yield data
                 ev = self._sock.getsockopt(zmq.EVENTS)
-            except zmq.ZMQError, zerr:
+            except zmq.ZMQError:
                 ev = self._sock.getsockopt(zmq.EVENTS)
                 break
 
@@ -554,12 +547,12 @@ class PollerWrapper(Poller):
             socks = dict(self.poller.poll(timeout))
         except zmq.ZMQError, zerr:
             if zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP \
-                or zerr.errno == zmq.ENOTSOCK:
+                    or zerr.errno == zmq.ENOTSOCK:
                 raise ConnectionError()
             LOGC.exception(zerr)
+            return []
 
         return [sock for sock in self._sockets if sock._sock in socks]
 
 if __name__ == "__main__":
     zmc = ZmqCliTransport()
-    # zmc.run_local_dispatcher()

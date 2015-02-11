@@ -6,7 +6,7 @@
 
 
 Name:       cloudrunner
-Version:    0.5
+Version:    $VER
 Release:    4.cloudr%{?dist}
 Summary:    CloudRunner engine for running scripts in cloud environment
 Group:      Cloud tools
@@ -24,9 +24,12 @@ BuildRequires: python-devel
 
 Requires: python-argparse
 Requires: m2crypto
-Requires: python-zmq
+Requires: python-zmq >= 13.0
+Requires: python-msgpack >= 0.4
 Requires: python-httplib2
 Requires: python-setuptools
+Requires: python-psutil
+Requires: python-IPy
 
 %if 0%{?rhel} < 7 && 0%{?fedora} < 13
 Requires: python-importlib
@@ -110,7 +113,6 @@ rm -rf %{buildroot}
 
 %dir %{python_sitelib}/cloudrunner/
 %{python_sitelib}/cloudrunner/tests/
-%{python_sitelib}/cloudrunner/tests/*
 %{python_sitelib}/cloudrunner/__init__*
 %{python_sitelib}/cloudrunner/core
 %{python_sitelib}/cloudrunner/util
@@ -126,9 +128,8 @@ rm -rf %{buildroot}
 if [ "$1" = 0 ]
 then
         /sbin/service %{name}-node stop > /dev/null 2>&1 || :
-        /sbin/chkconfig %{name}-node --del sshd
+        /sbin/chkconfig %{name}-node --del
 fi
-
 
 %files node
 %{_bindir}/cloudrunner-node

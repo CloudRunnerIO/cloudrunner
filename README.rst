@@ -1,7 +1,7 @@
-CloudRunner.IO Command Line Tool and Server Agent
-==================================================
+CloudRunner.IO Agent tool and API
+==================================
 
-Copyright (c) 2013-2014 CloudRunner.IO_
+Copyright (c) 2013-2015 CloudRunner.IO_
 
 About
 --------
@@ -24,10 +24,9 @@ It's key features include:
     * **Workflow management** - run multi-step scripts on different servers, with the ability to restart a script from arbitrary step, while keeping the environment context as it was in the first run.
     * **Web dashboard** for performing different operational tasks and for monitoring latest activities using filters.
     * Execution of **scheduled tasks** (using Cron)
-    * **Triggers** - invoke stored script execution when a specific pattern appear in the activity logs.
-    * **Highly customizable platform** - write your own plugins(in Python) for different kind of workflow management.
     * **Multi-tenancy** - supports isolated group of users who can access servers in a shared environment (including public clouds).
     * **HA and Multi-server routing** - install master servers in different locations(subnets, public clouds, etc.) and access all your servers from a single access point. No need to attach to different master server to access a remote server into directly inaccessible network. All you need is to allow the master servers to see each other.
+    * **Highly customizable platform** - write your own plugins(in Python) for different kind of workflow management.
 
     For more details see `www.cloudrunner.io
     <http://www.cloudrunner.io>`_ or ask for details at info@cloudrunner.io
@@ -36,20 +35,22 @@ It's key features include:
 Developing CloudRunner
 -------------------------
 
-CloudRunner CLI/Agent is an open-source project under the Apache 2 license. See the code at `www.github.com/cloudrunner
+CloudRunner Agent is an open-source project under the Apache 2 license. See the code at `www.github.com/cloudrunner
 <http://www.github.com/cloudrunner/>`_. Everyone is welcome to contribute.
 
 
 Documentation
 ====================
 
-1. Command line tool installation
+1. CloudRunner.IO agent
 ------------------------------------
 
-First, install and configure the CLI tool with setting the needed certificates and paths::
+Install and configure the Agent for use with CloudRunner.IO Master server::
 
     pip install cloudrunner
-    cloudrunner-exec configure
+    cloudrunner-node configure --org=MY-API-KEY -i NODE_NAME
+
+`Note`: if **NODE_NAME** is skipped - the machine hostname will be used instead.
 
 `Note`: you might need to install some packages before installing with pip.
 Cloudrunner depends on **ZeroMQ**, **M2Crypto** and **httplib2**. Install them using::
@@ -67,112 +68,143 @@ You can install them usign pip, but make sure you have already installed::
     * OpenSSL Dev libraries: libssl-dev (Debian) openssl-devel (Centos) or openssl (Arch Linux)
     * Swig package (swig) on some Linuxes
 
-Note: to be able to use autocomplete, do the following::
 
-    pip install argcomplete
-    source cloudrunner-autocomplete
-
-Then run a simple script on your local machine::
-
-    $ cloudrunner
-    (bash)[local]$ hostname
-    (bash)[local]$
-
-    ========== JOB: @user local ==========
-    user@localhost$
-    my_computer_name
-
-Get the CLI details(will be used in next step)::
-
-    $ cloudrunner-exec details
-    Certificate fingerprint        BF1AF11AFCA7E3D334A2AECD4B00B36635F560B0
-    CLI cert CN                    my_computer_name
-
-
-2. Server node installation
+2. CloudRunner.IO Python API
 -------------------------------
 
-Install and configure a the cloudrunner-node package::
+To use the Python `CloudRunner.IO REST API`_ client - install cloudrunner using `pip`::
 
     pip install cloudrunner
-    cloudrunner-node configure
 
-Make sure to open port 5552 on the server(this can be configured in config)
+Instantiate the client object::
 
-* using `ufw`::
+    from cloudrunner.api.client import *
 
-    ufw allow 5552
+    client = Client('myusername', 'my_api_token')
 
+Now you are ready to load/modify data on the server. Lets start with just listing
+the repositories in the Library:
 
-* using iptables::
+    repos = client.library.repositories.list()
+    print repos
 
-    iptables -I INPUT -p tcp --dport 5552 -j ACCEPT
+Returns an array of repositories::
 
-Register the CLI details to allow access to this server using the details from the CLI above::
-
-    cloudrunner-node register_cli -cn my_computer_name -fp BF1AF11AFCA7E3D334A2AECD4B00B36635F560B0
-
-And finally start the server agent::
-
-    # In debug mode:
-    cloudrunner-node run
-
-    # In daemon mode - use start|stop|restart with the --pidfile option to control the process
-    cloudrunner-node start --pidfile cr-node.pid
+    [<cloudrunner.api.library.Repository at 0x7fb4f5e75fd0>,
+     <cloudrunner.api.library.Repository at 0x7fb4f6dd7410>,
+     <cloudrunner.api.library.Repository at 0x7fb4f5e777d0>,
+     <cloudrunner.api.library.Repository at 0x7fb4f5e77890>]
 
 
-3. Finally connect CLI with Server and start playing
--------------------------------------------------------
+You can use the returned objects and get their properties::
 
-From CLI start the cloudrunner tool:: 
+    print repos[0].name
 
-    $ cloudrunner
-    (bash)[local]:
+    >> "RepoName"
 
-Let's do a simple test. Export a variable and print it::
+Lets see the contents of the root folder in first repo::
 
-    (bash)[local]: MY_VAR="the myvar content"
+    print client.library.browser.list(repos[0].name, '/')
 
-Then print it:: 
+    [<cloudrunner.api.library.Folder at 0x7f046c81cd90>,
+     <cloudrunner.api.library.Script at 0x7f046c81ce10>,
+     <cloudrunner.api.library.Script at 0x7f046c81cb90>,
+     <cloudrunner.api.library.Script at 0x7f046c81cc10>,
+     <cloudrunner.api.library.Script at 0x7f046c81cc50>,
+     <cloudrunner.api.library.Script at 0x7f046c81cc90>,
+     <cloudrunner.api.library.Script at 0x7f046c81cbd0>]
 
-    (bash)[local]: echo $MY_VAR
-    ========== JOB: @user local ==========
-    user@localhost$
-    the myvar content
+Now lets make a search for a specific log::
 
-And it's now time to run some code remotely, using the directive `switch` [server_name]::
+    logs = client.logs.search.list(filter='my favourite pattern')
+    print logs
 
-    (bash)[local]: switch my_server_name
+Fortunatelly, we get some results::
 
-Someone might prefer to write in Python::
+    [<cloudrunner.api.logs.Log at 0x7f046c81cfd0>,
+    <cloudrunner.api.logs.Log at 0x7f046c81ca10>,
+    <cloudrunner.api.logs.Log at 0x7f046c81cb10>,
+    <cloudrunner.api.logs.Log at 0x7f046c81cb50>,
+    <cloudrunner.api.logs.Log at 0x7f046c81f090>,
+    <cloudrunner.api.logs.Log at 0x7f046c81f450>]
 
-    (bash)[my_server_name]: lang python
-    (python)[my_server_name]: import os
-    (python)[my_server_name]: print "Printing the MY_VAR content: ", os.environ['MY_VAR']
+To retrieve the information for a log, we will load it using::
 
-One more thing: attach a file using the directive `attach_file`::
+  log = client.logs.get.item(logs[0])
+  print log
 
-    (python)[my_server_name]: attach_file path/to/file
+  >> <cloudrunner.api.logs.Log object at 0x7f046c7b5310>
 
-Let's print the file contents on the server:::
+To get the runs under a specific workflow in a Log::
 
-    (python)[my_server_name]: print "File contents:", open('path/to/file').read()
+  print log.workflow[0].runs[0]
 
-Click double [Enter] to execute::
+  << [<cloudrunner.api.base.ApiObject at 0x7f046c7b5d90>]
 
-    (python)[my_server_name]:
-    (python)[my_server_name]:
+  print log.workflow[0].runs[0].uuid
 
-And voila - here is the result::
+  << u'ff57f0b8ac1a426783d5763626be07cb'
 
-    ========== JOB: @user 2390bfae ==========
-    user@my_server_name$
-    Printing the MY_VAR content: the myvar content
-    File contents: [ -- the contents of the file follows --]
+We want to see the output from the first run in the first workflow::
 
-    (python)[my_server_name]:
+    logs = client.logs.output.item(l.workflows[0].runs[0].uuid)
+    print logs
 
-Now you have the basic knowledge how to use the CloudRunner.IO_ **CLI** and **Server agent**.
-Use your imagination (and the `help` command of course) to do more and more!
+    >> [<cloudrunner.api.logs.Log at 0x7f046d08f390>]
+
+    print logs[0].screen
+
+    >> <cloudrunner.api.base.ApiObject object at 0x7f046c7b5f90>
+
+    print logs[0].screen._values
+
+    >> {u'NODE_NAME': {u'lines': [[1423063412.399, [u'OUTPUT FROM MY SCRIPT EXECUTION'], u'O']]}}
+
+In fact, we can load the node data directly from the screen object::
+
+    print logs[0].screen.NODE_NAME.lines
+
+    >> [[1423063412.399, [u'OUTPUT FROM MY SCRIPT EXECUTION'], u'O']]
+
+We can also get the currently registered nodes in our account::
+
+    nodes = client.nodes.nodes.list()
+    print nodes
+
+    >> [<cloudrunner.api.nodes.Node at 0x7f8664b10250>,
+     <cloudrunner.api.nodes.Node at 0x7f86645151d0>,
+     <cloudrunner.api.nodes.Node at 0x7f8664515050>]
+
+    node = nodes[0]
+    print node.name
+
+    >> NODE_NAME
+
+    print node.meta._values
+
+    >> {
+         u'ARCH': u'x86_64',
+         u'AVAIL_MEM': 767,
+         u'CPUS': None,
+         u'CPU_CORES': 1,
+         u'CRN_VER': u'1.1.0',
+         u'DIST': u'CentOS',
+         u'HOST': u'NODE_NAME',
+         u'ID': u'NODE_NAME',
+         u'MASTER_IP': u'192.168.1.1',
+         u'OS': u'Linux',
+         u'PRIVATE_IP': [u'10.1.1.1', u'127.0.0.1'],
+         u'PUBLIC_IP': [u'54.1.1.1'],
+         u'RELEASE': u'2.6.32-431.29.2.el6.x86_64',
+         u'SERVER_NAME': u'NODE_NAME',
+         u'TOTAL_MEM': 992
+      }
+
+    print node.joined_at
+
+    >> u'2015-01-28 10:39:44'
+
 
 .. _CloudRunner.IO: http://www.cloudrunner.io
+.. _CloudRunner.IO REST API: http://api.cloudrunner.io/docs
+

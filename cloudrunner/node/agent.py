@@ -19,6 +19,11 @@
 #    under the License.
 
 import logging
+try:
+    from collections import OrderedDict
+except ImportError:
+    # python 2.6 or earlier, use backport
+    from ordereddict import OrderedDict
 
 from cloudrunner import CONFIG_NODE_LOCATION
 from cloudrunner import NODE_LOG_LOCATION
@@ -41,26 +46,20 @@ try:
 except ImportError:
     pass
 import argparse
-import argparse
-import json
+import msgpack
 import os
 import signal
-import socket
 from threading import Thread
 from threading import Event
-import time
-import sys
 
 from cloudrunner.core import parser
 from cloudrunner.core.exceptions import ConnectionError
-from cloudrunner.core.message import RegisterRep
-from cloudrunner.core.message import ADMIN_TOWER
-from cloudrunner.core.message import StatusCodes
+from cloudrunner.core.message import (StatusCodes, Ready, Job, M,
+                                      JobTarget, FileExport)
 from cloudrunner.core.process import Processor
 from cloudrunner.node.matcher import Matcher
 from cloudrunner.plugins.transport.base import TransportBackend
 from cloudrunner.util.daemon import Daemon
-from cloudrunner.util.loader import load_plugins
 from cloudrunner.util.loader import load_plugins_from
 from cloudrunner.util.shell import colors
 from cloudrunner.util.validator import validate_address
@@ -84,12 +83,17 @@ class AgentNode(Daemon):
         if 'NO_COLORS' in os.environ:
             colors.disable()
 
+        self.load_transport_class()
+        load_plugins(CONFIG)
+
+    def load_transport_class(self):
+        self.transport_class = None
+
         # Defaults to Single-user transport
         transport_class = CONFIG.transport or \
             'cloudrunner.plugins.transport.node_transport.NodeTransport'
 
         (mod, _, klass) = transport_class.rpartition('.')
-        self.transport_class = None
         transport_module = load_plugins_from(mod, [TransportBackend])
         if not transport_module:
             print colors.red("Cannot find module for transport plugin: %s" %
@@ -101,12 +105,10 @@ class AgentNode(Daemon):
                 break
 
         if not self.transport_class:
-            print colors.red("Cannot find transport class %s from module %s" %
-                            (klass, mod))
+            print colors.red(
+                "Cannot find transport class %s from module %s" % (klass,
+                                                                   mod))
             exit(1)
-
-        assert self.transport_class
-        load_plugins(CONFIG)
 
     def choose(self):
         if self.args.action in ['start', 'stop', 'restart']:
@@ -122,6 +124,18 @@ class AgentNode(Daemon):
     def configure(self):
         # Run initial configuration
         LOG.info("Running initial configuration")
+        if self.args.mode == "server":
+            CONFIG.update("General", "transport",
+                          "cloudrunner.plugins.transport.zmq_node_transport."
+                          "NodeTransport")
+            CONFIG.reload()
+            self.load_transport_class()
+        elif self.args.mode == "single-mode":
+            CONFIG.update("General", "transport",
+                          "cloudrunner.plugins.transport.node_transport."
+                          "NodeTransport")
+            CONFIG.reload()
+            self.load_transport_class()
         self.backend = self.transport_class.from_config(
             CONFIG, **vars(self.args))
         kwargs = dict(vars(self.args))
@@ -130,15 +144,16 @@ class AgentNode(Daemon):
         self.backend.configure(overwrite=self.args.overwrite, **kwargs)
 
     def details(self):
-        self.matcher = Matcher(CONFIG.node_id)
-        props = [(k, v) for (k, v) in self.matcher.props.items()]
-        props = sorted(props, key=lambda x: x[0])
-        print colors.blue('%-30s' % 'ID', bold=1), colors.blue('%s' %
-                                                               CONFIG.node_id)
-        for item in props:
-            print colors.blue('%-30s' % item[0], bold=1), colors.blue(item[1])
         if not hasattr(self, "backend"):
             self.backend = self.transport_class.from_config(CONFIG)
+
+        meta = OrderedDict(sorted(self.backend.meta().items(),
+                                  key=lambda x: x[0]))
+
+        print colors.blue('%-30s' % 'ID', bold=1), colors.blue('%s' %
+                                                               CONFIG.node_id)
+        for k, v in meta.items():
+            print colors.blue('%-30s' % k, bold=1), colors.blue(v)
         if self.backend.properties:
             print colors.blue('===== Backend properties =====')
             for item in self.backend.properties:
@@ -207,11 +222,11 @@ class AgentNode(Daemon):
                       "Run program with config option first")
             exit(1)
 
-        self.matcher = Matcher(self.node_id)
         self.backend = self.transport_class.from_config(
             CONFIG, **vars(self.args))
         load_plugins(CONFIG)
         self.sessions = {}
+        self.matcher = Matcher(self.node_id, self.backend.meta())
 
         LOG.info("Starting node")
         self.details()
@@ -235,7 +250,8 @@ class AgentNode(Daemon):
             exit(1)
 
         def request_processor():
-            req_queue = self.backend.consume_queue('requests')
+            req_queue = self.backend.consume_queue('requests',
+                                                   ident="DISPATCHER")
             poller = self.backend.create_poller(req_queue)
             while not self.running.is_set():
                 try:
@@ -243,12 +259,16 @@ class AgentNode(Daemon):
                     if not ready:
                         continue
                     if req_queue in ready:
-                        message = req_queue.recv()
+                        message = req_queue.recv()[0]
                         if not message:
                             continue
-                        self.target_match(*message)
+                        job = JobTarget.build(message)
+                        if job:
+                            self.target_match(job)
                 except ConnectionError:
                     break
+                except Exception:
+                    continue
             req_queue.close()
 
         Thread(target=request_processor).start()
@@ -264,15 +284,6 @@ class AgentNode(Daemon):
         LOG.info("Exiting Node, current sessions: %s" % self.sessions)
         self.backend.terminate()
 
-    class Dispatcher(Thread):
-
-        def __init__(self, backend):
-            control_queue = backend.publish_queue('dispatcher')
-            super(AgentNode.Dispatcher, self).__init__()
-
-        def run(self):
-            pass
-
     class Session(Thread):
 
         def __init__(self, session_id, backend):
@@ -280,10 +291,10 @@ class AgentNode(Daemon):
             self.session_id = str(session_id)
             self.done = False
             self.backend = backend
-            self.queue = backend.publish_queue('jobs', ident=self.session_id)
-            self.queue.send(self.session_id, StatusCodes.READY)
-
             LOG.info("Creating session %s" % self.session_id)
+            self.queue = backend.publish_queue('jobs', ident=self.session_id)
+            ready_msg = Ready(self.session_id, StatusCodes.READY)
+            self.queue.send(ready_msg._)
 
         def _close(self):
             self.done = True
@@ -296,39 +307,50 @@ class AgentNode(Daemon):
             self._close()
 
         def _yield_reply(self, *reply):
-            LOG.debug("[%s] Yielding %s" % (self.session_id, reply[0]))
+            LOG.debug("[%s] Yielding %s" % (self.session_id, reply))
             try:
-                self.queue.send(self.session_id, *list(reply))
+                frames = list(reply)
+                # Dest
+                frames.insert(1, self.session_id)
+                # JobId
+                frames.insert(1, self.session_id)
+                reply = M(*frames)
+                self.queue.send(reply._)
+            except ConnectionError:
+                self._close()
+
+        def _yield_file(self, file_name, content):
+            LOG.debug("[%s] Yielding file %s" % (self.session_id, file_name))
+            try:
+                reply = FileExport(self.session_id, self.session_id,
+                                   file_name, content)
+                self.queue.send(reply._)
             except ConnectionError:
                 self._close()
 
         def run(self):
-            self.job_attr = self.queue.recv(2)
-            if not self.job_attr:
+            data = self.queue.recv(5)
+            if not data:
                 LOG.error("[%s] Timeout waiting for Job description" %
                           self.session_id)
                 self._close()
                 return
-            command = self.job_attr[0].lower()
-            if not hasattr(self, command):
+            job = M.build(data[0])
+            if not job:
                 LOG.error('Session %s: UNKNOWN COMMAND RECEIVED:: %s' % (
-                    self.session_id, command))
+                    self.session_id, job))
                 return
 
-            LOG.info("Session::%s: command:: %s" % (self.session_id, command))
+            LOG.info("Session::%s: job:: %r" % (self.session_id, job))
 
-            return getattr(self, command)(*self.job_attr[1:])
+            if isinstance(job, Job):
+                self.job(job.remote_user, job.request)
 
-        def job(self, *args):
+        def job(self, remote_user, request):
             LOG.info('Recv:: JOB for session %s', self.session_id)
-            try:
-                remote_user, request = json.loads(args[0])
-            except ValueError:
-                LOG.error('Malformed request received: %s' % args[0])
-                return
             command = request['script']
             env = request['env']
-            proc = Processor(remote_user)
+            processor = Processor(remote_user)
             lang = parser.parse_lang(command)
 
             LOG.info("Node[%s]::: User:::[%s] UUID:::[%s] LANG:::[%s]" %
@@ -337,104 +359,105 @@ class AgentNode(Daemon):
             if isinstance(command, unicode):
                 command = command.encode('utf8')
 
-            incl_header = []
+            try:
+                atts = request.get('attachments', [])
+                if atts and isinstance(atts, list):
+                    for att in atts:
+                        for name, content in att.items():
+                            # Save libs if any
+                            processor.add_libs(name=name, source=content)
+                # For long-running jobs
+                # self.socket.send_multipart([self.session_id,
+                #                            StatusCodes.WORKING,
+                #                            msgpack.packb(dict(stdout=value))])
 
-            libs = request.get('libs', [])
-            if libs:
-                for lib in libs:
-                    # Save libs if any
-                    script = proc.add_libs(**lib)
-                    if script:
-                        # inline
-                        if isinstance(script, unicode):
-                            script = script.encode('utf8')
-                        incl_header.append(script)
-            # For long-running jobs
-            # self.socket.send_multipart([self.session_id,
-            #                            StatusCodes.WORKING,
-            #                            json.dumps(dict(stdout=value))])
+                proc_iter = iter(processor.run(command, lang, env))
+                proc = next(proc_iter)
 
-            proc_iter = iter(proc.run(command, lang, env, inlines=incl_header))
-            proc = next(proc_iter)
+                def _encode(data):
+                    try:
+                        return msgpack.packb(data)
+                    except:
+                        return ""
 
-            def _encode(data):
-                try:
-                    return json.dumps(data)
-                except:
-                    return ""
+                if not isinstance(proc, list):
+                    proc.set_input_fd(self.queue)
 
-            if not isinstance(proc, list):
-                proc.set_input_fd(self.queue)
-
-                running = True
-                while running:
-                    to_read = proc.select(.2)
-                    if proc.poll() is not None:
-                        # We are done with the task
-                        LOG.info("Job %s finished" % self.session_id)
-                        running = False
-                        # Do not break, let consume the streams
-                    for fd_type in to_read:
-                        if fd_type == proc.TRANSPORT:
-                            try:
-                                frames = self.queue.recv(0)
-                            except:
-                                continue
-                            if frames and len(frames) == 2:
-                                if frames[0] == 'INPUT':
-                                    try:
-                                        proc.write(frames[1])
-                                    except:
-                                        continue
-                                elif frames[0] == 'TERM':
-                                    if len(frames) > 1 and frames[1] == 'kill':
-                                        # kill task
-                                        proc.kill()
-                                        LOG.info("Job %s killed" %
-                                                 self.session_id)
-                                    else:
-                                        # terminate task
-                                        proc.terminate()
-                                        LOG.info("Job %s terminated" %
-                                                 self.session_id)
+                    running = True
+                    while running:
+                        to_read = proc.select(.2)
+                        if proc.poll() is not None:
+                            # We are done with the task
+                            LOG.info("Job %s finished" % self.session_id)
+                            running = False
+                            # Do not break, let consume the streams
+                        for fd_type in to_read:
+                            if fd_type == proc.TRANSPORT:
+                                try:
+                                    frames = self.queue.recv(0)
+                                except:
                                     continue
-                        if fd_type == proc.STDOUT:
-                            data = proc.read_out()
-                            if data:
-                                enc_data = _encode(dict(stdout=data))
-                                if enc_data:
-                                    self._yield_reply(
-                                        StatusCodes.STDOUT,
-                                        proc.run_as,
-                                        enc_data)
-                        if fd_type == proc.STDERR:
-                            data = proc.read_err()
-                            if data:
-                                enc_data = _encode(dict(stderr=data))
-                                if enc_data:
-                                    self._yield_reply(
-                                        StatusCodes.STDERR,
-                                        proc.run_as,
-                                        enc_data)
+                                if frames and len(frames) == 2:
+                                    if frames[0] == 'INPUT':
+                                        try:
+                                            proc.write(frames[1])
+                                        except:
+                                            continue
+                                    elif frames[0] == 'TERM':
+                                        if (len(frames) > 1 and
+                                                frames[1] == 'kill'):
+                                            # kill task
+                                            proc.kill()
+                                            LOG.info("Job %s killed" %
+                                                     self.session_id)
+                                        else:
+                                            # terminate task
+                                            proc.terminate()
+                                            LOG.info("Job %s terminated" %
+                                                     self.session_id)
+                                        continue
+                            if fd_type == proc.STDOUT:
+                                data = proc.read_out()
+                                if data:
+                                    self._yield_reply(StatusCodes.STDOUT,
+                                                      proc.run_as, data)
+                            if fd_type == proc.STDERR:
+                                data = proc.read_err()
+                                if data:
+                                    self._yield_reply(StatusCodes.STDERR,
+                                                      proc.run_as, data)
 
-                run_as, ret_code, stdout, stderr, env = next(proc_iter)
-            else:
-                # Error invoking Popen, get params
-                run_as, ret_code, stdout, stderr, env = proc
-                if stdout:
-                    self._yield_reply(StatusCodes.STDOUT,
-                                      run_as,
-                                      json.dumps(dict(stdout=stdout)))
-                if stderr:
-                    self._yield_reply(StatusCodes.STDERR,
-                                      run_as,
-                                      json.dumps(dict(stderr=stderr)))
+                    run_as, ret_code, stdout, stderr, env = next(proc_iter)
+                else:
+                    # Error invoking Popen, get params
+                    run_as, ret_code, stdout, stderr, env = proc
+                    if stdout:
+                        self._yield_reply(StatusCodes.STDOUT, run_as, stdout)
+                    if stderr:
+                        self._yield_reply(StatusCodes.STDERR, run_as, stderr)
 
-            job_result = json.dumps(dict(env=env,
-                                         ret_code=ret_code,
-                                         stdout=stdout, stderr=stderr))
-            LOG.info('Job [%s] DONE' % (self.session_id))
-            self._yield_reply(StatusCodes.FINISHED, run_as, job_result)
+                if '__EXPORT__' in env:
+                    try:
+                        file_name = env.pop('__EXPORT__')
+                        path = os.path.join(processor.session_cwd, file_name)
+                        file_size = os.stat(path).st_size
+                        if file_size > 4 * 1024 * 1024:
+                            raise Exception('Exported file size bigger than'
+                                            ' limit(4 MB) [%s]' % file_name)
+                        with open(path) as exp_f:
+                            self._yield_file(file_name, exp_f.read())
+                    except Exception, ex:
+                        LOG.error(ex)
+                        pass
+                job_result = dict(env=env, ret_code=ret_code,
+                                  stdout=stdout, stderr=stderr)
+                LOG.info('Job [%s] DONE' % (self.session_id))
+                self._yield_reply(StatusCodes.FINISHED, run_as, job_result)
+
+            except Exception, ex:
+                LOG.error(ex)
+            finally:
+                processor.clean()
 
             self._close()
             # Invoke clean
@@ -453,16 +476,16 @@ class AgentNode(Daemon):
             LOG.info("Session::%s :: ERR:: %s" % (self.session_id, args))
             self._close()
 
-    def target_match(self, *args):
-        session_id, targets = args[0], args[1]
-        if self.matcher.is_match(targets):
+    def target_match(self, job):
+        if self.matcher.is_match(job.targets):
             try:
-                session = AgentNode.Session(session_id, self.backend)
+                session = AgentNode.Session(job.job_id, self.backend)
                 session.start()
-                self.sessions[session_id] = session
+                self.sessions[job.job_id] = session
                 return True
             except Exception, ex:
-                LOG.error("Cannot start Job Session: %r" % ex)
+                LOG.error("Cannot start Job Session")
+                LOG.exception(ex)
         return False
 
     def clean(self, *args):
@@ -481,11 +504,12 @@ def _parser():
         description="CloudRunner Node tool",
         formatter_class=argparse.RawTextHelpFormatter)
 
-    actions = parser.add_subparsers(dest="action",
-                                    help='Apply action on the daemonized process\n'
-                                    'For the actions [start, stop, restart] - pass a pid file\n'
-                                    'Configure - performs initial configuration\n'
-                                    'Run - start process in debug mode\n')
+    actions = parser.add_subparsers(
+        dest="action",
+        help='Apply action on the daemonized process\n'
+        'For the actions [start, stop, restart] - pass a pid file\n'
+        'Configure - performs initial configuration\n'
+        'Run - start process in debug mode\n')
 
     _common_run = argparse.ArgumentParser(add_help=False)
 
@@ -537,6 +561,17 @@ def _parser():
                            'Default is %(default)s',
                            required=False)
 
+    configure.add_argument('-t', '--tags', nargs='+',
+                           help="Tags associated with node \n"
+                           "(eg. --tags ORD DC1 CLOUD)",
+                           required=False)
+
+    configure.add_argument('--mode', dest='mode',
+                           required=False,
+                           choices=['server', 'single-mode'],
+                           help='Change node mode - `server` or `single-mode`.'
+                           )
+
     if (CONFIG.user_store):
         register_cli = actions.add_parser('register_cli')
         register_cli.add_argument('-cn', '--common-name',
@@ -556,8 +591,8 @@ def _parser():
         unregister_cli = actions.add_parser('unregister_cli')
         unregister_cli.add_argument('-cn', '--common-name',
                                     help='Common name of the certificate'
-                                    'to be removed as listed in subject. Use:\n'
-                                    '\tcloudrunner-exec details\n'
+                                    'to be removed as listed in subject. '
+                                    'Use:\n\tcloudrunner-exec details\n'
                                     'to find the fingerprint')
 
         unregister_cli.add_argument('-fp', '--fingerprint',
@@ -566,7 +601,7 @@ def _parser():
                                     '\tcloudrunner-exec details\n'
                                     'to find the fingerprint')
 
-        list_cli = actions.add_parser('list_cli')
+        actions.add_parser('list_cli')
 
     return parser
 

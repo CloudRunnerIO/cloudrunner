@@ -18,16 +18,33 @@
 #    under the License.
 
 import logging
-from socket import gethostname
-import platform
 import re
-
-from cloudrunner.version import VERSION
-from cloudrunner.util.net import get_local_ips
 
 SPLITTER = re.compile(r'\s+|,|;')
 
 LOG = logging.getLogger('Matcher')
+
+
+class CaseInsensitiveDict(dict):
+
+    def __init__(self, dict_):
+        super(CaseInsensitiveDict, self).__init__()
+        all_keys = dict_.keys()
+        for k in all_keys:
+            val = dict_.pop(k)
+            super(CaseInsensitiveDict, self).__setitem__(k.lower(), val)
+
+    def __setitem__(self, key, value, default=None):
+        raise Exception("Dict is readonly")
+
+    def __getitem__(self, key):
+        return super(CaseInsensitiveDict, self).__getitem__(key.lower())
+
+    def get(self, key):
+        return super(CaseInsensitiveDict, self).__getitem__(key.lower())
+
+    def __contains__(self, key):
+        return super(CaseInsensitiveDict, self).__contains__(key.lower())
 
 
 class Matcher(object):
@@ -36,37 +53,9 @@ class Matcher(object):
         Provides basic matching functions for node targets
     """
 
-    def __init__(self, node_id):
-        self.props = {}
+    def __init__(self, node_id, meta):
         self.node_id = node_id
-        self.host = gethostname().lower()
-        self.os = platform.system()
-        self.arch = platform.machine()
-        try:
-            # only OS, not version
-            self.dist = platform.linux_distribution()[0]
-            if not self.dist:
-                # Try a hack for ArchLinux
-                self.dist = platform.linux_distribution(
-                    supported_dists=('arch'))[0]  # only OS, not version
-        except:
-            # Python < 2.6
-            self.dist = platform.dist()[0]  # only OS, not version
-        self.release = platform.release()
-        self.ips = []
-        try:
-            self.ips = get_local_ips()
-        except:
-            pass
-        if not self.ips:
-            LOG.warn("No IPs were detected")
-
-        self.crn_version = VERSION
-
-    def __setattr__(self, name, value):
-        super(Matcher, self).__setattr__(name, value)
-        if name != 'props':
-            self.props[name] = value
+        self.meta = CaseInsensitiveDict(meta)
 
     def is_match(self, target_str):
         targets = SPLITTER.split(target_str)
@@ -77,13 +66,23 @@ class Matcher(object):
                 if '=' in target:
                     # we have specific selector
                     k, _, v = target.partition('=')
-                    if not hasattr(self, k):
+                    if k not in self.meta:
                         return False
-                    return re.match(self.prepare_re(v), getattr(self, k), re.I)
+                    val = self.meta.get(k)
+                    if isinstance(val, basestring):
+                        return re.match(self.prepare_re(v), self.meta.get(k),
+                                        re.I)
+                    elif isinstance(val, (int, long)):
+                        return int(v) == val
+                    elif isinstance(val, float):
+                        return float(v) == val
+                    else:
+                        return False
                 else:
-                    return re.match(self.prepare_re(target), self.node_id, re.I) \
-                        or target in self.ips
-            except:
+                    return re.match(self.prepare_re(target),
+                                    self.node_id, re.I)
+            except Exception, ex:
+                LOG.exception(ex)
                 return
 
         return filter(_match, targets)

@@ -75,7 +75,7 @@ class Base(object):
         state_file.close()
 
         _lines = re.sub(
-            r'\w*\s\(.*\)\s*\{?\s(\s{4}.*\s)+\}?', '',  _lines, re.S)
+            r'\w*\s\(.*\)\s*\{?\s(\s{4}.*\s)+\}?', '', _lines, re.S)
         lines = [line for line in _lines.split('\n') if line]
 
         def clean(val):

@@ -24,8 +24,8 @@ from cloudrunner.util.shell import *  # noqa
 
 
 def configure_loggers(min_level, log_file, log_format=None):
-    DEFAULT_LOG_FORMAT = '%(asctime)s(%(name)s)[%(process)d--%(threadName)s]::'\
-        '%(levelname)s - %(funcName)s(%(message)s)'
+    DEFAULT_LOG_FORMAT = ('%(asctime)s(%(name)s)[%(process)d--%(threadName)s]'
+                          '::%(levelname)s - %(funcName)s(%(message)s)')
     blue_pref = '\x1b[' + BLUE
     red_pref = '\x1b[' + RED
     green_pref = '\x1b[' + GREEN

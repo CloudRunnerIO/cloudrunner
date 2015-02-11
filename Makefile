@@ -75,4 +75,4 @@ clean:
 
 .PHONY: test
 test:
-	$(__python) setup.py test & flake8 cloudrunner
+	tox

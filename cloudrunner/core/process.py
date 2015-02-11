@@ -80,6 +80,8 @@ class Processor(object):
             mod_env['USER'] = self.as_user
 
             paths = []
+            if "PYTHONPATH" in os.environ:
+                paths.append(os.environ.get("PYTHONPATH"))
             paths.append(os.path.realpath(os.path.join(
                 os.path.dirname(os.path.abspath(cloudrunner.__file__)), '..')))
             paths.append(self.session_cwd)

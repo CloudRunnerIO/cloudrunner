@@ -30,7 +30,7 @@ import time
 import zmq
 from zmq.eventloop import ioloop
 
-from cloudrunner import CONFIG_SHELL_LOC, LIB_DIR
+from cloudrunner import LIB_DIR
 from cloudrunner.core.exceptions import ConnectionError
 from cloudrunner.plugins.transport.base import (TransportBackend,
                                                 Endpoint,

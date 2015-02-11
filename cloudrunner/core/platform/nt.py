@@ -17,11 +17,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import unittest
 import os
 if os.name != 'nt':
-    raise unittest.case.SkipTest(
-        "The rest of this code will not be run on Linux.")
+    try:
+        from unittest import SkipTest
+    except ImportError:
+        from unittest2 import SkipTest
+
+        raise SkipTest(
+            "The rest of this code will not be run on Linux.")
 
 import msgpack
 import logging

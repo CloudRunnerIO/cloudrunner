@@ -140,8 +140,8 @@ class NodeTransport(TransportBackend):
                 try:
                     self.ssl_socket.start()  # Start TLSZMQ server socket
                 except zmq.ZMQError, zerr:
-                    if (zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP
-                            or zerr.errno == zmq.ENOTSOCK):
+                    if (zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP or
+                            zerr.errno == zmq.ENOTSOCK):
                         # System interrupt
                         break
                 except KeyboardInterrupt:
@@ -226,8 +226,8 @@ class NodeTransport(TransportBackend):
                 LOGC.info('Exiting node listener thread')
                 break
             except zmq.ZMQError, zerr:
-                if (zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP
-                        or zerr.errno == zmq.ENOTSOCK):
+                if (zerr.errno == zmq.ETERM or zerr.errno == zmq.ENOTSUP or
+                        zerr.errno == zmq.ENOTSOCK):
                     break
                 LOGC.exception(zerr)
                 LOGC.error(zerr.errno)

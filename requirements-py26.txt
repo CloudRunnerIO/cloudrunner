@@ -6,4 +6,3 @@ msgpack-python>=0.4
 psutil
 ipy
 ordereddict
-unittest2

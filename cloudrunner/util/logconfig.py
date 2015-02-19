@@ -44,7 +44,7 @@ def configure_loggers(min_level, log_file, log_format=None):
     if log_format:
         _format = log_format
     else:
-        if "NO_COLORS" in os.environ:
+        if 'NO_COLORS' in os.environ or os.name == 'nt':
             _format = DEFAULT_LOG_FORMAT
         else:
             _format = COLOR_LOG_FORMAT

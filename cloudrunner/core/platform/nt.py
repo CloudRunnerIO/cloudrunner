@@ -76,6 +76,8 @@ class CredentialManager(object):
 
     def __init__(self, credentials_map_file):
         self.credentials = {}
+        if not credentials_map_file:
+            return
         try:
             with open(credentials_map_file) as f:
                 cred_map = msgpack.unpackb(f.read())
@@ -108,13 +110,17 @@ class NtProcessor(object):
 
     def __init__(self, as_user, credentials_map_file=None, refresh_interval=1):
         self.cred_manager = CredentialManager.instance(credentials_map_file)
-        # as_user
+        # No impersonation
+        """
         if as_user == '@':
-            # No impersonation
             self.as_user = win32api.GetUserName()
         else:
             self.as_user = 'cloudrunner'  # self.cred.user
+        """
         self.refresh_interval = refresh_interval
+        self.ready = True
+        self.as_user = "@"
+        self._myself = win32api.GetUserName()
 
     def get_home(self):
         return os.environ.get('HOME', "c:\\temp\\")
@@ -123,7 +129,10 @@ class NtProcessor(object):
         return os.environ.get('HOME', "c:\\temp\\")
 
     def get_uid(self):
-        return winsec.LookupAccountName('', self.as_user)[0]
+        if self.as_user == "@":
+            return winsec.LookupAccountName('', self._myself)[0]
+        else:
+            return winsec.LookupAccountName('', self.as_user)[0]
 
     def get_gid(self):
         return None
@@ -150,8 +159,10 @@ class NtProcessor(object):
         pass
 
     def popen(self, exec_file_args, session_cwd, env):
-        # self.impersonate()
+        self.impersonate()
         try:
+            # Set SystemRoot magic first
+            env.update({"SystemRoot": os.environ.get('SystemRoot')})
             proc = subprocess.Popen(exec_file_args,
                                     # Disable stdin until blocking is fixed
                                     # stdin=subprocess.PIPE,
@@ -165,8 +176,7 @@ class NtProcessor(object):
             return PopenWrapper(proc, self.as_user)
         finally:
             # Ensure revert is called
-            # self.revert()
-            pass
+            self.revert()
 
 
 class PopenWrapper(object):
@@ -180,7 +190,7 @@ class PopenWrapper(object):
         self.stdin = popen.stdin
         self.stdout = popen.stdout
         self.stderr = popen.stderr
-        self.input = None
+        self.input_fd = None
         self.run_as = run_as
 
         self.stdout_reader = AsyncPipeReader(self.stdout)
@@ -188,8 +198,8 @@ class PopenWrapper(object):
         self.stdout_reader.start()
         self.stderr_reader.start()
 
-    def set_input_sock(self, input_socket):
-        self.input = input_socket
+    def set_input_fd(self, input_socket):
+        self.input_fd = input_socket.fd()
 
     def select(self, timeout=0):
         ret = []
@@ -225,7 +235,7 @@ class PopenWrapper(object):
                 pass
 
             ret_code = self.popen.returncode
-            return (self.run_as, ret_code, stdout, stderr)
+            return (ret_code, stdout, stderr)
         finally:
             self.stdout_reader.close()
             self.stderr_reader.close()

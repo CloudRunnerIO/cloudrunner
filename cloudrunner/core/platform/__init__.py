@@ -29,10 +29,25 @@ class AsyncPipeReader(threading.Thread):
         self._buf = StringIO.StringIO()
         self.lock = threading.Lock()
 
+    def _decode(self, string, encodings=['utf-8', 'utf-16',
+                                         'Windows-1252',
+                                         'latin1']):
+        for enc in encodings:
+            try:
+                s = string.decode(enc)
+                return s
+            except UnicodeDecodeError:
+                continue
+        # Fallback - decode to UTF8 with ignoring un-recognized characters
+        return string.decode('utf-8', 'ignore')
+
     def run(self):
         for line in iter(self.pipe.readline, ''):
             with self.lock:
-                self._buf.write(line)
+                line = line.strip()
+                if line and line != '\x00':
+                    self._buf.write(self._decode(line))
+                    self._buf.write("\n")
 
     def read(self):
         # Consume current data and flush buffer

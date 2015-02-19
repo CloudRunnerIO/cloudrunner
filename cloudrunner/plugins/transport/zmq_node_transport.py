@@ -201,8 +201,8 @@ class NodeTransport(TransportBackend):
 
         if os.name == 'nt':
             control_uri = 'tcp://127.0.0.1:54112'
-            ssl_proxy_uri = 'tcp://127.0.0.1:54112'
-            int_proxy = 'tcp://127.0.0.1:54113'
+            ssl_proxy_uri = 'tcp://127.0.0.1:54113'
+            int_proxy = 'tcp://127.0.0.1:54114'
         else:
             control_uri = 'inproc://control-queue.sock'
             # ssl_proxy_uri = 'inproc://ssl-proxy-queue.sock'
@@ -639,7 +639,7 @@ class NodeTransport(TransportBackend):
             os.makedirs(cert_dir)
 
         key_file = config.security.node_key
-        if not key_file or os.path.exists(key_file):
+        if key_file and os.path.exists(key_file):
             if not overwrite:
                 print("Node key file already exists in your config. "
                       "If you want to create new one - run\n"
@@ -651,7 +651,7 @@ class NodeTransport(TransportBackend):
                 return False
 
         crt_file = config.security.node_cert
-        if not crt_file or os.path.exists(crt_file):
+        if crt_file and os.path.exists(crt_file):
             if not overwrite:
                 print("Node certificate file already exists in your config. "
                       "If you still want to create new one - run\n"

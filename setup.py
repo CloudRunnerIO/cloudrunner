@@ -40,7 +40,7 @@ from cloudrunner.version import VERSION
 
 requirements = [req.strip() for req in open(req_file).read().split()]
 
-test_requirements = ['nose>=1.0', 'mock', 'coverage', 'flake8']
+test_requirements = ['nose>=1.0', 'mock', 'coverage', 'flake8', 'unittest2']
 
 with open('README.rst') as f:
     long_desc = f.read()

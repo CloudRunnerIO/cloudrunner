@@ -80,7 +80,7 @@ class AgentNode(Daemon):
 
         self.args = self._parser.parse_args()
 
-        if 'NO_COLORS' in os.environ:
+        if 'NO_COLORS' in os.environ or os.name == 'nt':
             colors.disable()
 
         self.load_transport_class()
@@ -333,7 +333,7 @@ class AgentNode(Daemon):
                     self.session_id, job))
                 return
 
-            LOG.info("Session::%s: job:: %r" % (self.session_id, job))
+            LOG.info("Session::%s" % self.session_id)
 
             if isinstance(job, Job):
                 self.job(job.remote_user, job.request)
@@ -544,14 +544,9 @@ def _parser():
                            required=False,
                            help='Organization to be set in certificate')
 
-    configure.add_argument('--server', dest='server_uri',
+    configure.add_argument('-s', '--server', dest='server_uri',
                            required=False,
                            help='Remove Server IP address')
-
-    configure.add_argument('-k', '--key-size', default=2048,
-                           help='Default size of Node key. '
-                           'Default is %(default)s',
-                           required=False)
 
     configure.add_argument('-t', '--tags', nargs='+',
                            help="Tags associated with node \n"

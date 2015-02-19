@@ -32,7 +32,9 @@ SHEBANG = {
     'ruby': '/usr/bin/ruby',
     'puppet': '/usr/bin/puppet apply',
     'salt': '/usr/bin/salt',
-    'nodejs': '/usr/bin/nodejs'
+    'nodejs': '/usr/bin/nodejs',
+    'ps': 'powershell',
+    'ps1': 'powershell'
 }
 
 COMMENT_SYMBOL = {

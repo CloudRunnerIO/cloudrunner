@@ -13,18 +13,19 @@ __python=$(shell V=$$(python -V 2>&1 | awk '{ print $$2 }' | sed 's/\(.*\)\..*/\
 .PHONY : default_target
 default_target: all
 
-
 .PHONY: all
-all: clean
-	$(__python) setup.py build
-        ## _last_ ## $(__python) setup.py develop --install-dir . -m
-
+all: sdist prepare
+	./scripts/rpm/rpm-mock.sh epel-6-x86_64
+	./scripts/rpm/rpm-mock.sh epel-7-x86_64
+	./scripts/rpm/rpm-mock.sh fedora-19-x86_64
+	./scripts/rpm/rpm-mock.sh fedora-20-x86_64
+	./scripts/rpm/rpm-mock.sh fedora-21-x86_64
+	rm -rf cloudrunner.spec
 
 .PHONY: sdist
 sdist: clean
 	rm -rf dist/cloudrunner*.tar.gz
 	$(__python) setup.py sdist
-
 
 .PHONY: rpm
 rpm: sdist
@@ -36,35 +37,38 @@ rpm: sdist
 	sed -i 's/^Release:.*/Release:        $(RELEASE)%{?dist}/g' cloudrunner.spec
 	sed -i 's/^Version:.*/Version:        $(VERSION)/g' cloudrunner.spec
 	rpmbuild -ba cloudrunner.spec
-	rm cloudrunner.spec
+	rm -rf cloudrunner.spec
 
-.PHONY: rpm-el5_64
-rpm-el5_64: sdist
-	./scripts/rpm/rpm-mock.sh epel-5-x86_64
+.PHONY: prepare
+prepare:
+	cp cloudrunner.spec.in cloudrunner.spec
+	sed -i 's/^Release:.*/Release:        $(RELEASE)%{?dist}/g' cloudrunner.spec
+	sed -i 's/^Version:.*/Version:        $(VERSION)/g' cloudrunner.spec
 
-.PHONY: rpm-el6_64
-rpm-el6_64: sdist
+.PHONY: rpm-el6_x64
+rpm-el6_x64: sdist prepare
 	./scripts/rpm/rpm-mock.sh epel-6-x86_64
+	rm -rf cloudrunner.spec
 
-.PHONY: rpm-f19_64
-rpm-f19_64: sdist
+.PHONY: rpm-el7_x64
+rpm-el7_x64: sdist prepare
+	./scripts/rpm/rpm-mock.sh epel-7-x86_64
+	rm -rf cloudrunner.spec
+
+.PHONY: rpm-f19_x64
+rpm-f19_x64: sdist prepare
 	./scripts/rpm/rpm-mock.sh fedora-19-x86_64
+	rm -rf cloudrunner.spec
 
-.PHONY: rpm-el5_32
-rpm-el5_32: sdist
-	./scripts/rpm/rpm-mock.sh epel-5-i386
+.PHONY: rpm-f20_x64
+rpm-f20_x64: sdist prepare
+	./scripts/rpm/rpm-mock.sh fedora-20-x86_64
+	rm -rf cloudrunner.spec
 
-.PHONY: rpm-el6_32
-rpm-el6_32: sdist
-	./scripts/rpm/rpm-mock.sh epel-6-i386
-
-.PHONY: rpm-f19_32
-rpm-f19_32: sdist
-	./scripts/rpm/rpm-mock.sh fedora-19-i386
-
-.PHONY: userinstall
-userinstall: gen_stubs
-	$(__python) setup.py install --user
+.PHONY: rpm-f21_x64
+rpm-f21_x64: sdist prepare
+	./scripts/rpm/rpm-mock.sh fedora-21-x86_64
+	rm -rf cloudrunner.spec
 
 .PHONY: clean
 clean:

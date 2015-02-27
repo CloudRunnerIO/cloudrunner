@@ -50,7 +50,7 @@ class ReqMixin(object):
 
         try:
             full_path = "/".join([self.path, path])
-            LOG.info("Sending request to %s [%s]" % (full_path, kwargs))
+            LOG.debug("Sending request to %s [%s]" % (full_path, kwargs))
             res = requests.request(method, full_path, data=json.dumps(kwargs),
                                    headers=headers)
             LOG.debug(res)
@@ -90,7 +90,6 @@ class ResourceManager(ReqMixin):
                 _wrapper = "%s%s" % (_wrapper, self.suffix)
                 if _wrapper in data:
                     for i in data[_wrapper]:
-                        print i, model
                         items.append(model(**i))
         else:
             _wrapper = self.wrapper or self.models[0].type()
@@ -130,7 +129,7 @@ class ResourceManager(ReqMixin):
 
         res = self._request('get', '/'.join([self.app_path, urlargs]),
                             **kwargs)
-        LOG.info(res)
+        LOG.debug(res)
         items = []
         items = self._unwrap(res)
         return items
@@ -166,7 +165,7 @@ class ResourceManager(ReqMixin):
         if res.get('success'):
             return True
         else:
-            return "ERROR: " % res.get("error", {}).get("msg")
+            return "ERROR: %s" % res.get("error", {}).get("msg")
 
 _REST__subclasses = []
 

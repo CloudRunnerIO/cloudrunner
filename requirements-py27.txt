@@ -4,3 +4,4 @@ httplib2
 msgpack-python>=0.4
 psutil
 ipy
+requests

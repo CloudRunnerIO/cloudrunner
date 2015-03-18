@@ -548,6 +548,10 @@ def _parser():
                            required=False,
                            help='Remove Server IP address')
 
+    configure.add_argument('-l', '--cleanup', dest='auto_cleanup',
+                           required=False, action='store_true',
+                           help='Remove Server IP address')
+
     configure.add_argument('-t', '--tags', nargs='+',
                            help="Tags associated with node \n"
                            "(eg. --tags ORD DC1 CLOUD)",

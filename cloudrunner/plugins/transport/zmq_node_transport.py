@@ -52,7 +52,7 @@ class NodeTransport(TransportBackend):
 
     proto = 'zmq+ssl'
 
-    config_options = ["node_id", "master_pub", "master_repl",
+    config_options = ["node_id", "master_pub", "master_repl", "auto_cleanup",
                       "worker_count", "sock_dir", "security.node_csr",
                       "security.server", "security.node_cert",
                       "security.node_key", "security.ca", "security.cert_pass"]
@@ -60,7 +60,7 @@ class NodeTransport(TransportBackend):
     def __init__(self, node_id=None, master_pub=None, master_repl=None,
                  worker_count=5, sock_dir=None, node_cert=None, node_key=None,
                  ca=None, server=None, node_csr=None, ping_master=None,
-                 cert_pass=None, **kwargs):
+                 cert_pass=None, auto_cleanup=None, **kwargs):
         self.node_id = node_id or socket.gethostname()
         self.worker_count = worker_count
         self.master_pub = master_pub
@@ -79,6 +79,7 @@ class NodeTransport(TransportBackend):
         self.sock_dir = sock_dir
         self.ping_master = ping_master
         self.properties.append(('Backend type', self.proto))
+        self.auto_cleanup = auto_cleanup
         if self.node_cert and \
                 os.path.exists(self.node_cert):
             try:
@@ -443,7 +444,8 @@ class NodeTransport(TransportBackend):
         def _next(reply):
             if not reply:
                 # First call? Send CSR
-                return Register(node_id, csreq_data, meta=self.meta())
+                return Register(node_id, csreq_data, meta=self.meta(),
+                                auto_cleanup=self.auto_cleanup)
 
             msg = Control.build(reply)
             if not msg:
@@ -512,12 +514,14 @@ class NodeTransport(TransportBackend):
             elif msg.status == "REJECTED":
                 if msg.message == 'SEND_CSR':
                     # resend
-                    return Register(node_id, csreq_data, meta=self.meta())
+                    return Register(node_id, csreq_data, meta=self.meta(),
+                                    auto_cleanup=self.auto_cleanup)
                 if msg.message == 'PENDING':
                     LOGC.info("Master says: Request queued for approval.")
                     if time.time() < start_reg + int(self.wait_for_approval):
                         time.sleep(10)  # wait 10 sec before next try
-                        return Register(node_id, csreq_data, meta=self.meta())
+                        return Register(node_id, csreq_data, meta=self.meta(),
+                                        auto_cleanup=self.auto_cleanup)
                     else:
                         return -1
                 elif msg.message == 'ERR_CRT_EXISTS':
@@ -634,6 +638,8 @@ class NodeTransport(TransportBackend):
         if kwargs.get("node_id"):
             self.node_id = kwargs["node_id"]
 
+        self.auto_cleanup = bool(kwargs.get('auto_cleanup'))
+
         cert_dir = os.path.join(conf_dir, 'certs')
         if not os.path.exists(cert_dir):
             os.makedirs(cert_dir)
@@ -723,6 +729,7 @@ class NodeTransport(TransportBackend):
         config.update('General', 'node_id', self.node_id)
         config.update('General', 'work_dir',
                       os.path.join(conf_dir, 'tmp'))
+        config.update('General', 'auto_cleanup', self.auto_cleanup)
 
         if kwargs.get("server_uri"):
             ip = kwargs.get("server_uri")

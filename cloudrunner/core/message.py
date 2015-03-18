@@ -353,7 +353,7 @@ class JobTarget(M):
 
 class Register(M):
     dest = ADMIN_TOWER
-    fields = ['node', 'data', 'meta']
+    fields = ['node', 'data', 'meta', 'auto_cleanup']
 
 
 class Control(M):

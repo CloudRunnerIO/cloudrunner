@@ -203,7 +203,7 @@ class PopenWrapper(object):
 
     def select(self, timeout=0):
         ret = []
-        if self.input and self.input.poll(timeout):
+        if self.input_fd and self.input_fd.poll(timeout):
             ret.append(self.TRANSPORT)
 
         if self.stdout_reader.has_data():

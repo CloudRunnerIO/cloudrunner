@@ -199,7 +199,7 @@ class PopenWrapper(object):
         self.stderr_reader.start()
 
     def set_input_fd(self, input_socket):
-        self.input_fd = input_socket.fd()
+        self.input_fd = None  # input_socket.fd()  # Not Implemented Yet
 
     def select(self, timeout=0):
         ret = []

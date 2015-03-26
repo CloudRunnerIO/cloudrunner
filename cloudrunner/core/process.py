@@ -149,9 +149,9 @@ class Processor(object):
                     initial_env[k] = jsonify1(v)
                 else:
                     initial_env[k] = stringify1(v)
-            popen = self.executor.popen(exec_file_args,
-                                        self.session_cwd,
-                                        initial_env)
+            popen = self.executor.popen(
+                exec_file_args, self.session_cwd, initial_env,
+                supports_shell=self.state_manager.supports_shell(lang))
             yield popen
         except OSError, oserr:
             LOG.exception(oserr)

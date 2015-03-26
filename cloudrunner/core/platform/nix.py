@@ -92,9 +92,9 @@ class NixProcessor(object):
         except Exception, ex:
             LOG.warning(str(ex))
 
-    def popen(self, exec_file_name, session_cwd, env):
+    def popen(self, exec_file_name, session_cwd, env, supports_shell=True):
         proc = Popen(exec_file_name,
-                     shell=True,
+                     shell=supports_shell,
                      stdin=PIPE,
                      stdout=PIPE,
                      stderr=PIPE,

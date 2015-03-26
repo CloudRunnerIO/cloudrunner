@@ -158,7 +158,7 @@ class NtProcessor(object):
         # we set permissions to user only, no need to change owner
         pass
 
-    def popen(self, exec_file_args, session_cwd, env):
+    def popen(self, exec_file_args, session_cwd, env, supports_shell=False):
         self.impersonate()
         try:
             # Set SystemRoot magic first

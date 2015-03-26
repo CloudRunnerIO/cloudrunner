@@ -65,6 +65,12 @@ class StateManager(object):
 
         return [exec_file_name]
 
+    def supports_shell(self, lang):
+        proc_class = self.processors.get(lang, None)
+        if not proc_class:
+            return True
+        return getattr(proc_class, "supports_shell", True)
+
     def save_state(self):
         if not self.proc:
             return {}

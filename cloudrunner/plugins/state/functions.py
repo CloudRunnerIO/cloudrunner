@@ -327,6 +327,7 @@ __exit 0"""
 
 class NodeJS(Base, StatePluginBase):
     lang = "nodejs"
+    supports_shell = False
 
     def set_state_handlers(self):
         prepare_env, store_env = '', ''
@@ -343,13 +344,16 @@ class NodeJS(Base, StatePluginBase):
 
     @staticmethod
     def exec_params(exec_file_name):
-        if platform.dist() in ("Ubuntu", "Debian"):
-            # On some distros assume nodejs
-            return ["/usr/bin/nodejs", exec_file_name]
-        elif os.name == 'nt':
-            return ["node", exec_file_name]
-        else:
-            return ["/usr/bin/node", exec_file_name]
+        try:
+            if os.name == 'nt':
+                return ["node", exec_file_name]
+            dist = platform.linux_distribution()[0].lower()
+            if dist in ("ubuntu", "debian"):
+                # On some distros assume nodejs
+                return ["/usr/bin/nodejs", exec_file_name]
+        except:
+            pass
+        return ["/usr/bin/node", exec_file_name]
 
 
 class Puppet(Base, StatePluginBase):

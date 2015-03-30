@@ -34,6 +34,7 @@ CRN_SHEBANG = re.compile("^#!\s*([\/\w]*cloudrunner)\s*(.*)", re.M)
 SECTION_SPLIT = re.compile("(^#!\s*switch\s*\[.*\].*)", re.M)
 SELECTOR = re.compile('(?P<selector>^#!\s*switch\s*'
                       '\[(?P<selectors>.*)\])(?P<args>.*)$')
+INCLUDES = re.compile("(^#!\s*include\s+(?P<args>.*)$)", re.M)
 PARAMS = re.compile('(?P<sel>\S*)(?P<param>\$\S+)')
 USR_BIN_ENV = re.compile("#!\s*/usr/bin/env\s*(?P<lang>\w+)")
 LANG = re.compile("^#!\s*(?P<lang>\S*)\s*\n?")
@@ -56,6 +57,21 @@ def parse_selectors(section):
         args = match.group(3)
         return selectors, args
     return (None, None)
+
+
+def parse_includes(section):
+    """
+        Parse section to check if it is a node selector
+    """
+    includes = INCLUDES.findall(section)
+    return includes
+
+
+def substitute_includes(section, callback=None):
+
+    def inner(match_obj):
+        return callback(match_obj.group(2))
+    return INCLUDES.sub(inner, section)
 
 
 def has_params(targets):
@@ -132,7 +148,7 @@ class Section(object):
         return "%s\n%s" % (self.header, self.body)
 
 
-def parse_sections(document):
+def parse_sections(document, include_substitute=None):
     try:
         strings = re.split(SECTION_SPLIT, document, re.M)
         strings.pop(0)
@@ -141,6 +157,9 @@ def parse_sections(document):
             section = Section()
             section.header = strings[i]
             section.body = strings[i + 1]
+            if include_substitute:
+                section.body = substitute_includes(section.body,
+                                                   callback=include_substitute)
             section.lang = parse_lang(strings[i + 1])
             sections.append(section)
             target, args = parse_selectors(section.header)

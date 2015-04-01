@@ -93,6 +93,7 @@ hostname > test.sh"
         env_str = "#!/usr/bin/env"
         bin_str = "#!/usr/bin/"
         unmatched_str = "unmatched string"
+        unmatched_str2 = "#! include /usr/bin/python\r\n"
         win_str = "#!/usr/bin/%s\r\nscript 1 2 3\r\n"
 
         parsed_language = parser.parse_lang(
@@ -100,7 +101,7 @@ hostname > test.sh"
         self.assertEqual(parsed_language, language)
         test_str = bin_str + language + "\n"
         parsed_language = parser.parse_lang(test_str)
-        self.assertEqual(parsed_language, language, test_str)
+        self.assertEqual(parsed_language, language)
 
         with mock.patch("os.name", "nt"):
             reload(parser)
@@ -113,6 +114,9 @@ hostname > test.sh"
         with mock.patch("os.name", "not-nt"):
             reload(parser)
             parsed_language = parser.parse_lang(unmatched_str)
+            self.assertEqual(parsed_language, parser.LANG_BASH)
+
+            parsed_language = parser.parse_lang(unmatched_str2)
             self.assertEqual(parsed_language, parser.LANG_BASH)
 
     def test_remove_shebang(self):

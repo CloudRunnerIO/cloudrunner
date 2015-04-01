@@ -37,7 +37,7 @@ SELECTOR = re.compile('(?P<selector>^#!\s*switch\s*'
 INCLUDES = re.compile("(^#!\s*include\s+(?P<args>.*)$)", re.M)
 PARAMS = re.compile('(?P<sel>\S*)(?P<param>\$\S+)')
 USR_BIN_ENV = re.compile("#!\s*/usr/bin/env\s*(?P<lang>\w+)")
-LANG = re.compile("^#!\s*(?P<lang>\S*)\s*\n?")
+LANG = re.compile("^#!\s*(?P<lang>\/\S+)(?:$|\r?\n)")
 
 if os.name != 'nt':
     DEFAULT_LANG = LANG_BASH

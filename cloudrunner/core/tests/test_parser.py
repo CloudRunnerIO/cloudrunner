@@ -93,17 +93,21 @@ hostname > test.sh"
         env_str = "#!/usr/bin/env"
         bin_str = "#!/usr/bin/"
         unmatched_str = "unmatched string"
+        win_str = "#!/usr/bin/%s\r\nscript 1 2 3\r\n"
 
         parsed_language = parser.parse_lang(
             "{0} {1}\n".format(env_str, language))
         self.assertEqual(parsed_language, language)
         test_str = bin_str + language + "\n"
         parsed_language = parser.parse_lang(test_str)
-        self.assertEqual(parsed_language, language)
+        self.assertEqual(parsed_language, language, test_str)
 
         with mock.patch("os.name", "nt"):
             reload(parser)
             parsed_language = parser.parse_lang(unmatched_str)
+            self.assertEqual(parsed_language, parser.LANG_PS)
+
+            parsed_language = parser.parse_lang(win_str % parser.LANG_PS)
             self.assertEqual(parsed_language, parser.LANG_PS)
 
         with mock.patch("os.name", "not-nt"):
